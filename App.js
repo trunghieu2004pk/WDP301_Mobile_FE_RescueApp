@@ -1,20 +1,53 @@
-import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import React from 'react';
+import { View, Text } from 'react-native';
+import { NavigationContainer } from '@react-navigation/native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { AuthProvider, useAuth } from './src/context/AuthContext';
 
-export default function App() {
+import TabNavigator from './src/navigation/TabNavigator';
+import AdminStack from './src/navigation/AdminStack';
+import CoordinatorStack from './src/navigation/CoordinatorStack';
+import RescueTeamStack from './src/navigation/RescueTeamStack';
+
+// AppContent: điều hướng theo role sau khi auth
+const AppContent = () => {
+  const { user, isLoading } = useAuth();
+
+  if (isLoading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <Text>Đang tải...</Text>
+      </View>
+    );
+  }
+
+  const renderStack = () => {
+    switch (user?.role) {
+      case 'ADMIN':
+        return <AdminStack />;
+      case 'COORDINATOR':
+        return <CoordinatorStack />;
+      case 'RESCUE_TEAM':
+        return <RescueTeamStack />;
+      default:
+        return <TabNavigator />;
+    }
+  };
+
   return (
-    <View style={styles.container}>
-      <Text>Open up App.js to start working on your app!</Text>
-      <StatusBar style="auto" />
-    </View>
+    <NavigationContainer>
+      {renderStack()}
+    </NavigationContainer>
   );
-}
+};
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});
+// Root component
+const MainApp = () => (
+  <SafeAreaProvider>
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
+  </SafeAreaProvider>
+);
+
+export default MainApp;
