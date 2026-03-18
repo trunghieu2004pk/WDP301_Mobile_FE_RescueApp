@@ -14,9 +14,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../context/AuthContext';
 
+const API_URL = process.env.EXPO_PUBLIC_API_URL;
+
 const ChangePassword = ({ navigation }) => {
   const insets = useSafeAreaInsets();
-  const { user } = useAuth();
+  const { user, getAuthHeaders } = useAuth();
 
   const [formData, setFormData] = useState({
     currentPassword: '',
@@ -29,6 +31,8 @@ const ChangePassword = ({ navigation }) => {
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [showModal, setShowModal] = useState(false);
+  const [modalData, setModalData] = useState({ type: 'success', title: '', message: '', onPress: () => setShowModal(false) });
 
   const validateForm = () => {
     const newErrors = {};
@@ -43,6 +47,8 @@ const ChangePassword = ({ navigation }) => {
       newErrors.newPassword = 'Mật khẩu mới không được để trống';
     } else if (formData.newPassword.length < 6) {
       newErrors.newPassword = 'Mật khẩu mới phải có ít nhất 6 ký tự';
+    } else if (formData.newPassword === formData.currentPassword) {
+      newErrors.newPassword = 'Mật khẩu mới không được trùng mật khẩu hiện tại';
     }
 
     // Validate confirm password
@@ -62,26 +68,40 @@ const ChangePassword = ({ navigation }) => {
     setIsSubmitting(true);
 
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      // In real app, this would call an API endpoint
-      Alert.alert('Thành công', 'Mật khẩu đã được thay đổi thành công!', [
-        {
-          text: 'OK',
-          onPress: () => {
-            // Clear form
-            setFormData({
-              currentPassword: '',
-              newPassword: '',
-              confirmPassword: ''
-            });
-            navigation.goBack();
-          }
-        }
-      ]);
+      const response = await fetch(`${API_URL}/users/change-password`, {
+        method: 'PATCH',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          oldPassword: formData.currentPassword,
+          newPassword: formData.newPassword,
+        }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const message = data?.message || `Lỗi ${response.status}: Không thể đổi mật khẩu`;
+        throw new Error(message);
+      }
+
+      setModalData({
+        type: 'success',
+        title: 'Thành công',
+        message: 'Mật khẩu đã được thay đổi thành công!',
+        onPress: () => {
+          setShowModal(false);
+          setFormData({ currentPassword: '', newPassword: '', confirmPassword: '' });
+          navigation.goBack();
+        },
+      });
+      setShowModal(true);
     } catch (error) {
-      Alert.alert('Lỗi', 'Không thể thay đổi mật khẩu. Vui lòng thử lại.');
+      setModalData({
+        type: 'error',
+        title: 'Lỗi',
+        message: error.message || 'Không thể thay đổi mật khẩu. Vui lòng thử lại.',
+        onPress: () => setShowModal(false),
+      });
+      setShowModal(true);
     } finally {
       setIsSubmitting(false);
     }
@@ -215,6 +235,21 @@ const ChangePassword = ({ navigation }) => {
 
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      {showModal && (
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={[styles.modalIconWrap, modalData.type === 'success' ? { backgroundColor: '#E8FFF1' } : { backgroundColor: '#FFF0F1' }]}>
+              <Ionicons name={modalData.type === 'success' ? 'checkmark-circle' : 'alert-circle'} size={36} color={modalData.type === 'success' ? '#27AE60' : '#FF4757'} />
+            </View>
+            <Text style={styles.modalTitle}>{modalData.title}</Text>
+            <Text style={styles.modalMessage}>{modalData.message}</Text>
+            <TouchableOpacity style={[styles.modalConfirmBtn, modalData.type === 'success' ? { backgroundColor: '#27AE60' } : { backgroundColor: '#FF4757' }]} onPress={modalData.onPress}>
+              <Text style={styles.modalConfirmText}>OK</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
     </SafeAreaView>
   );
 };
@@ -308,6 +343,55 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
+  },
+  modalOverlay: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 30,
+  },
+  modalContainer: {
+    width: '100%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 24,
+    alignItems: 'center',
+  },
+  modalIconWrap: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 14,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#2F3542',
+    marginBottom: 6,
+  },
+  modalMessage: {
+    fontSize: 14,
+    color: '#57606F',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 16,
+  },
+  modalConfirmBtn: {
+    paddingVertical: 12,
+    paddingHorizontal: 28,
+    borderRadius: 12,
+  },
+  modalConfirmText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
 });
 

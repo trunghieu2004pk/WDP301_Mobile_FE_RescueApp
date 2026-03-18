@@ -6,13 +6,12 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 import HomeStack from './HomeStack';
 import RequestStatusScreen from '../screens/user/RequestStatusScreen';
-import { DangerMapScreen, NewsAlertsScreen } from './PlaceholderScreens';
+import { NewsAlertsScreen, VolunteerScreen } from './PlaceholderScreens'; // ✅ đổi import
 import RescueRequestDetailScreen from '../screens/user/RescueRequestDetailScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
 
-// Stack riêng cho tab Trạng thái để có thể navigate sang chi tiết
 const StatusStack = () => (
   <Stack.Navigator>
     <Stack.Screen
@@ -34,19 +33,19 @@ const TabNavigator = () => {
   return (
     <Tab.Navigator
       screenOptions={{
-        tabBarActiveTintColor: '#FF4757',
-        tabBarInactiveTintColor: '#95a5a6',
+        tabBarActiveTintColor: '#E8293A',
+        tabBarInactiveTintColor: '#94A3B8',
         tabBarStyle: {
           backgroundColor: '#fff',
           borderTopWidth: 1,
-          borderTopColor: '#ecf0f1',
+          borderTopColor: '#E2E8F0',
           paddingTop: 8,
           paddingBottom: insets.bottom > 0 ? insets.bottom : 8,
           height: 60 + (insets.bottom > 0 ? insets.bottom : 0),
         },
         tabBarLabelStyle: {
-          fontSize: 12,
-          fontWeight: '500',
+          fontSize: 11,
+          fontWeight: '600',
         },
       }}
     >
@@ -71,12 +70,13 @@ const TabNavigator = () => {
         }}
       />
       <Tab.Screen
-        name="Bản đồ"
-        component={DangerMapScreen}
+        name="Tình nguyện"
+        component={VolunteerScreen}
         options={{
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="map" size={size} color={color} />
+            <Ionicons name="people" size={size} color={color} />
           ),
+          headerShown: false,
         }}
       />
       <Tab.Screen
@@ -86,6 +86,7 @@ const TabNavigator = () => {
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="newspaper" size={size} color={color} />
           ),
+          headerShown: false,
         }}
       />
     </Tab.Navigator>

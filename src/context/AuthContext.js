@@ -107,8 +107,18 @@ export const AuthProvider = ({ children }) => {
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   });
 
+  const updateUser = async (partial) => {
+    try {
+      const next = { ...(user || {}), ...(partial || {}) };
+      await AsyncStorage.setItem('userData', JSON.stringify(next));
+      setUser(next);
+    } catch (e) {
+      console.error('Error updating user data:', e);
+    }
+  };
+
   return (
-    <AuthContext.Provider value={{ user, token, login, logout, isLoading, getAuthHeaders }}>
+    <AuthContext.Provider value={{ user, token, login, logout, isLoading, getAuthHeaders, updateUser }}>
       {children}
     </AuthContext.Provider>
   );

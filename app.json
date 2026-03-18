@@ -13,7 +13,12 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Ứng dụng cần quyền camera để chụp ảnh hiện trường cứu hộ.",
+        "NSPhotoLibraryUsageDescription": "Ứng dụng cần quyền truy cập thư viện ảnh để đính kèm hình ảnh.",
+        "NSLocationWhenInUseUsageDescription": "Ứng dụng cần vị trí để xác định điểm cứu hộ."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -23,7 +28,10 @@
       "edgeToEdgeEnabled": true,
       "permissions": [
         "ACCESS_FINE_LOCATION",
-        "ACCESS_COARSE_LOCATION"
+        "ACCESS_COARSE_LOCATION",
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "READ_MEDIA_IMAGES"
       ]
     },
     "web": {
@@ -34,6 +42,20 @@
         "@rnmapbox/maps",
         {
           "RNMapboxMapsImpl": "mapbox"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Ứng dụng cần quyền camera để chụp ảnh hiện trường cứu hộ.",
+          "microphonePermission": false,
+          "photosPermission": "Ứng dụng cần quyền truy cập thư viện ảnh để đính kèm hình ảnh."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Ứng dụng cần vị trí để xác định điểm cứu hộ."
         }
       ]
     ]

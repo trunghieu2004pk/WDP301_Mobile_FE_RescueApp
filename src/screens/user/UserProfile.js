@@ -76,7 +76,7 @@ const UserProfile = ({ navigation }) => {
   };
 
   const handleEditProfile = () => {
-    navigation.navigate('EditUserProfile', { 
+    navigation.navigate('EditProfile', { 
       userData: {
         username: userData?.username || user?.username,
         name: userData?.name || userData?.fullName || user?.name,

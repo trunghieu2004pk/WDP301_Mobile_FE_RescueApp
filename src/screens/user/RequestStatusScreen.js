@@ -1,46 +1,51 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  SafeAreaView,
-  Alert,
-  ActivityIndicator,
-  RefreshControl,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity,
+  SafeAreaView, Alert, ActivityIndicator, RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../context/AuthContext';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL;
 
-const STATUS_MAP = {
-  PENDING:    { label: 'Đang chờ xử lý', color: '#FF4D4F', icon: 'time-outline' },
-  PROCESSING: { label: 'Đang xử lý',     color: '#F39C12', icon: 'time-outline' },
-  ON_THE_WAY: { label: 'Đang đến',       color: '#2E91FF', icon: 'boat-outline' },
-  COMPLETED:  { label: 'Đã hoàn thành',  color: '#27AE60', icon: 'checkmark-circle-outline' },
-  CANCELLED:  { label: 'Đã hủy',         color: '#A4B0BE', icon: 'close-circle-outline' },
+const C = {
+  red:      '#E8293A', redLight:  '#FFF0F1', redBorder: '#FFCDD0',
+  green:    '#16A34A', greenLight:'#F0FDF4',
+  blue:     '#2563EB', blueLight: '#EFF6FF',
+  amber:    '#D97706', amberLight:'#FFFBEB',
+  slate:    '#57606F', slateLight:'#F8FAFC',
+  text:     '#0F172A', sub:       '#64748B',
+  muted:    '#94A3B8', border:    '#E2E8F0',
+  bg:       '#F8FAFC', white:     '#FFFFFF',
 };
 
-const getStatusInfo = (status) =>
-  STATUS_MAP[status] ?? { label: status, color: '#747D8C', icon: 'help-circle-outline' };
+const STATUS_MAP = {
+  PENDING:    { label: 'Đang chờ',    color: C.red,   bg: C.redLight,   icon: 'time-outline'             },
+  VERIFIED:   { label: 'Đã xác minh', color: C.blue,  bg: C.blueLight,  icon: 'shield-checkmark-outline' },
+  PROCESSING: { label: 'Đang xử lý', color: C.amber, bg: C.amberLight, icon: 'sync-outline'             },
+  ON_THE_WAY: { label: 'Đang đến',   color: C.blue,  bg: C.blueLight,  icon: 'navigate-outline'         },
+  COMPLETED:  { label: 'Hoàn thành', color: C.green, bg: C.greenLight, icon: 'checkmark-circle-outline' },
+  CANCELLED:  { label: 'Đã hủy',     color: C.muted, bg: C.slateLight, icon: 'close-circle-outline'     },
+};
+
+const getStatus = (s) =>
+  STATUS_MAP[s] ?? { label: s, color: C.muted, bg: C.slateLight, icon: 'help-circle-outline' };
 
 const RequestStatusScreen = ({ navigation }) => {
   const insets = useSafeAreaInsets();
-  const { getAuthHeaders } = useAuth();
+  const { getAuthHeaders, user } = useAuth();
 
-  const [requests, setRequests]     = useState([]);
-  const [loading, setLoading]       = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError]           = useState(null);
-  // Track which request IDs are currently confirming
+  const [requests, setRequests]           = useState([]);
+  const [loading, setLoading]             = useState(true);
+  const [refreshing, setRefreshing]       = useState(false);
+  const [error, setError]                 = useState(null);
   const [confirmingIds, setConfirmingIds] = useState(new Set());
 
-  const fetchRequests = useCallback(async () => {
+  const fetchRequests = useCallback(async (silent = false) => {
     try {
-      setError(null);
+      if (!silent) setError(null);
       const response = await fetch(`${API_URL}/rescue-requests/my-requests`, {
         method: 'GET',
         headers: getAuthHeaders(),
@@ -60,37 +65,38 @@ const RequestStatusScreen = ({ navigation }) => {
     }
   }, [getAuthHeaders]);
 
-  useEffect(() => { fetchRequests(); }, [fetchRequests]);
+  useFocusEffect(
+    useCallback(() => {
+      if (!user) { setLoading(false); return; }
+      setLoading(true);
+      fetchRequests();
+    }, [user, fetchRequests])
+  );
 
-  const onRefresh = () => { setRefreshing(true); fetchRequests(); };
+  const onRefresh = () => { setRefreshing(true); fetchRequests(true); };
 
-  // ─── Xác nhận đã được cứu hộ — PATCH /rescue-requests/{id}/confirm-rescued ─
   const handleConfirmRescue = (id) => {
     Alert.alert(
       'Xác nhận cứu hộ',
-      'Bạn xác nhận đã được cứu hộ/cứu trợ an toàn cho yêu cầu này?',
+      'Bạn xác nhận đã được cứu hộ an toàn cho yêu cầu này?',
       [
         { text: 'Huỷ', style: 'cancel' },
-        { text: 'Xác nhận', style: 'default', onPress: () => confirmRescueAPI(id) },
+        { text: 'Xác nhận', onPress: () => confirmRescueAPI(id) },
       ]
     );
   };
 
   const confirmRescueAPI = async (id) => {
-    // Thêm id vào set đang loading
     setConfirmingIds(prev => new Set(prev).add(id));
     try {
       const response = await fetch(`${API_URL}/rescue-requests/${id}/confirm-rescued`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
       });
-
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
         throw new Error(data?.message || `Lỗi ${response.status}`);
       }
-
-      // Cập nhật local state ngay — không cần reload toàn bộ
       setRequests(prev =>
         prev.map(req =>
           (req._id === id || req.id === id)
@@ -102,145 +108,177 @@ const RequestStatusScreen = ({ navigation }) => {
     } catch (err) {
       Alert.alert('Lỗi', err.message || 'Không thể xác nhận. Vui lòng thử lại.');
     } finally {
-      setConfirmingIds(prev => {
-        const next = new Set(prev); next.delete(id); return next;
-      });
+      setConfirmingIds(prev => { const n = new Set(prev); n.delete(id); return n; });
     }
   };
 
-  // ─── Loading state ────────────────────────────────────────────────────────
-  if (loading) {
+  // ─── Chưa đăng nhập ───────────────────────────────────────────────────────
+  if (!user) {
     return (
       <SafeAreaView style={styles.container}>
-        <View style={[styles.centerContainer, { paddingTop: insets.top + 20 }]}>
-          <ActivityIndicator size="large" color="#FF4757" />
-          <Text style={styles.loadingText}>Đang tải yêu cầu...</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  // ─── Error state ──────────────────────────────────────────────────────────
-  if (error) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={[styles.centerContainer, { paddingTop: insets.top + 20 }]}>
-          <Ionicons name="cloud-offline-outline" size={64} color="#CED6E0" />
-          <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity style={styles.retryBtn} onPress={() => { setLoading(true); fetchRequests(); }}>
-            <Ionicons name="refresh" size={18} color="#FFF" />
-            <Text style={styles.retryBtnText}>Thử lại</Text>
+        <View style={styles.center}>
+          <View style={[styles.stateIcon, { backgroundColor: C.blueLight }]}>
+            <Ionicons name="lock-closed-outline" size={36} color={C.blue} />
+          </View>
+          <Text style={styles.stateTitle}>Chưa đăng nhập</Text>
+          <Text style={styles.stateSub}>
+            Vui lòng đăng nhập để xem trạng thái yêu cầu cứu hộ của bạn.
+          </Text>
+          <TouchableOpacity
+            style={[styles.stateBtn, { backgroundColor: C.blue }]}
+            onPress={() => navigation.getParent()?.navigate('Trang chủ', { screen: 'Login' })}
+          >
+            <Ionicons name="log-in-outline" size={16} color={C.white} />
+            <Text style={styles.stateBtnText}>Đăng nhập ngay</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
   }
 
-  // ─── Main render ──────────────────────────────────────────────────────────
+  // ─── Loading ──────────────────────────────────────────────────────────────
+  if (loading && !refreshing) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color={C.red} />
+          <Text style={styles.loadingText}>Đang tải yêu cầu...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // ─── Error ────────────────────────────────────────────────────────────────
+  if (error && !refreshing) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.center}>
+          <View style={[styles.stateIcon, { backgroundColor: C.redLight }]}>
+            <Ionicons name="cloud-offline-outline" size={36} color={C.red} />
+          </View>
+          <Text style={styles.stateTitle}>Không thể tải dữ liệu</Text>
+          <Text style={styles.stateSub}>{error}</Text>
+          <TouchableOpacity
+            style={[styles.stateBtn, { backgroundColor: C.red }]}
+            onPress={() => { setLoading(true); fetchRequests(); }}
+          >
+            <Ionicons name="refresh" size={16} color={C.white} />
+            <Text style={styles.stateBtnText}>Thử lại</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // ─── Main ─────────────────────────────────────────────────────────────────
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView
-        contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 20 }]}
+        contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 16 }]}
         showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            colors={['#FF4757']}
-            tintColor="#FF4757"
-          />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[C.red]} tintColor={C.red} />
         }
       >
         {/* Header */}
         <View style={styles.headerRow}>
           <Text style={styles.headerTitle}>Yêu cầu của bạn</Text>
-          <Text style={styles.countBadge}>{requests.length}</Text>
+          {requests.length > 0 && (
+            <View style={styles.countBadge}>
+              <Text style={styles.countText}>{requests.length}</Text>
+            </View>
+          )}
         </View>
 
+        {/* Empty */}
         {requests.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <Ionicons name="document-text-outline" size={80} color="#CED6E0" />
-            <Text style={styles.emptyText}>Bạn chưa có yêu cầu cứu hộ nào.</Text>
+          <View style={styles.emptyWrap}>
+            <View style={styles.emptyIcon}>
+              <Ionicons name="document-text-outline" size={36} color={C.muted} />
+            </View>
+            <Text style={styles.emptyTitle}>Chưa có yêu cầu nào</Text>
+            <Text style={styles.emptySub}>Nhấn bên dưới để gửi yêu cầu cứu hộ đầu tiên</Text>
             <TouchableOpacity
-              style={styles.newRequestBtn}
-              onPress={() => navigation.navigate('EmergencyReport')}
+              style={styles.newBtn}
+              onPress={() => navigation.getParent()?.navigate('Trang chủ', { screen: 'EmergencyReport' })}
             >
-              <Text style={styles.newRequestBtnText}>Gửi yêu cầu ngay</Text>
+              <Ionicons name="add-circle-outline" size={18} color={C.white} />
+              <Text style={styles.newBtnText}>Gửi yêu cầu ngay</Text>
             </TouchableOpacity>
           </View>
         ) : (
           requests.map((item) => {
-            const id = item._id ?? item.id;
-            const statusInfo = getStatusInfo(item.status);
-            const isCompleted = item.status === 'COMPLETED';
-            const isConfirmed = isCompleted || item.confirmedByUser;
+            const id           = item._id ?? item.id;
+            const si           = getStatus(item.status);
+            const isConfirmed  = item.status === 'COMPLETED' || item.confirmedByUser;
             const isConfirming = confirmingIds.has(id);
 
             return (
               <TouchableOpacity
                 key={id}
-                style={styles.requestCard}
-                activeOpacity={0.85}
+                style={styles.card}
+                activeOpacity={0.82}
                 onPress={() => navigation.navigate('RescueRequestDetail', { request: item })}
               >
-                {/* Card Header */}
-                <View style={styles.cardHeader}>
-                  <View style={[styles.statusBadge, { backgroundColor: statusInfo.color + '20' }]}>
-                    <Ionicons name={statusInfo.icon} size={16} color={statusInfo.color} />
-                    <Text style={[styles.statusText, { color: statusInfo.color }]}>
-                      {statusInfo.label}
-                    </Text>
+                {/* Card header */}
+                <View style={styles.cardHead}>
+                  <View style={[styles.statusBadge, { backgroundColor: si.bg }]}>
+                    <Ionicons name={si.icon} size={13} color={si.color} />
+                    <Text style={[styles.statusText, { color: si.color }]}>{si.label}</Text>
                   </View>
-                  <Text style={styles.requestId}>
+                  <Text style={styles.reqId}>
                     #{item.requestCode ?? item.userCode ?? id?.slice(-6)?.toUpperCase()}
                   </Text>
                 </View>
 
-                {/* Card Body */}
+                <View style={styles.divider} />
+
+                {/* Card body */}
                 <View style={styles.cardBody}>
-                  <Text style={styles.dateText}>
-                    Thời gian: {item.createdAt
-                      ? new Date(item.createdAt).toLocaleString('vi-VN')
-                      : item.date ?? '—'}
-                  </Text>
+                  <View style={styles.metaRow}>
+                    <Ionicons name="time-outline" size={13} color={C.muted} />
+                    <Text style={styles.metaText}>
+                      {item.createdAt
+                        ? new Date(item.createdAt).toLocaleString('vi-VN')
+                        : item.date ?? '—'}
+                    </Text>
+                  </View>
                   {item.address && (
-                    <View style={styles.infoRow}>
-                      <Ionicons name="location" size={16} color="#747D8C" />
-                      <Text style={styles.infoText}>{item.address}</Text>
+                    <View style={styles.metaRow}>
+                      <Ionicons name="location-outline" size={13} color={C.muted} />
+                      <Text style={styles.metaText} numberOfLines={1}>{item.address}</Text>
                     </View>
                   )}
-                  <View style={styles.descriptionBox}>
-                    <Text style={styles.descriptionLabel}>Mô tả:</Text>
-                    <Text style={styles.descriptionContent} numberOfLines={3}>
+                  <View style={styles.descBox}>
+                    <Text style={styles.descLabel}>Mô tả</Text>
+                    <Text style={styles.descText} numberOfLines={3}>
                       {item.description ?? '—'}
                     </Text>
                   </View>
                 </View>
 
-                {/* Confirm button — chỉ hiện khi chưa hoàn thành */}
+                {/* Confirm button */}
                 {!isConfirmed && (
-                  <View style={styles.cardFooter}>
-                    <TouchableOpacity
-                      style={[styles.confirmBtn, isConfirming && styles.confirmBtnDisabled]}
-                      onPress={(e) => { e.stopPropagation?.(); handleConfirmRescue(id); }}
-                      disabled={isConfirming}
-                    >
-                      {isConfirming ? (
-                        <ActivityIndicator size="small" color="#FFF" />
-                      ) : (
-                        <Ionicons name="checkbox" size={20} color="#FFF" />
-                      )}
-                      <Text style={styles.confirmBtnText}>
-                        {isConfirming ? 'Đang xác nhận...' : 'Xác nhận đã được cứu hộ'}
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
+                  <TouchableOpacity
+                    style={[styles.confirmBtn, isConfirming && { opacity: 0.65 }]}
+                    onPress={(e) => { e.stopPropagation?.(); handleConfirmRescue(id); }}
+                    disabled={isConfirming}
+                    activeOpacity={0.82}
+                  >
+                    {isConfirming
+                      ? <ActivityIndicator size="small" color={C.white} />
+                      : <Ionicons name="checkbox-outline" size={18} color={C.white} />
+                    }
+                    <Text style={styles.confirmText}>
+                      {isConfirming ? 'Đang xác nhận...' : 'Xác nhận đã được cứu hộ'}
+                    </Text>
+                  </TouchableOpacity>
                 )}
 
-                {/* Confirmed badge */}
+                {/* Confirmed */}
                 {isConfirmed && (
-                  <View style={styles.confirmedBox}>
-                    <Ionicons name="checkmark-circle" size={18} color="#27AE60" />
+                  <View style={styles.confirmedRow}>
+                    <Ionicons name="checkmark-circle" size={16} color={C.green} />
                     <Text style={styles.confirmedText}>Bạn đã xác nhận hoàn thành</Text>
                   </View>
                 )}
@@ -248,60 +286,61 @@ const RequestStatusScreen = ({ navigation }) => {
             );
           })
         )}
+
+        <View style={{ height: 32 }} />
       </ScrollView>
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  container:       { flex: 1, backgroundColor: '#FFFFFF' },
-  scrollContent:   { paddingHorizontal: 20, paddingBottom: 40 },
-  centerContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 30 },
-  headerRow:       { flexDirection: 'row', alignItems: 'center', marginBottom: 20, gap: 10 },
-  headerTitle:     { fontSize: 24, fontWeight: 'bold', color: '#2F3542' },
-  countBadge: {
-    backgroundColor: '#FF4757', color: '#FFF', fontSize: 13, fontWeight: 'bold',
-    paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, overflow: 'hidden',
-  },
-  loadingText: { marginTop: 12, color: '#747D8C', fontSize: 14 },
-  errorText:   { color: '#747D8C', fontSize: 14, textAlign: 'center', marginTop: 12, marginBottom: 20 },
-  retryBtn: {
-    flexDirection: 'row', alignItems: 'center', backgroundColor: '#FF4757',
-    paddingHorizontal: 20, paddingVertical: 10, borderRadius: 10, gap: 6,
-  },
-  retryBtnText: { color: '#FFF', fontWeight: 'bold' },
-  requestCard: {
-    backgroundColor: '#FFFFFF', borderRadius: 20, padding: 20, marginBottom: 16,
-    borderWidth: 1, borderColor: '#F1F2F6',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 3,
-  },
-  cardHeader:  { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 },
-  statusBadge: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
-  statusText:  { fontSize: 13, fontWeight: 'bold', marginLeft: 6 },
-  requestId:   { fontSize: 13, color: '#A4B0BE', fontWeight: '600' },
-  cardBody:    { marginBottom: 15 },
-  dateText:    { fontSize: 13, color: '#747D8C', marginBottom: 10, fontWeight: '500' },
-  infoRow:     { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
-  infoText:    { fontSize: 14, color: '#2F3542', marginLeft: 6, fontWeight: '500', flex: 1 },
-  descriptionBox:     { backgroundColor: '#F8F9FA', padding: 12, borderRadius: 10 },
-  descriptionLabel:   { fontSize: 12, fontWeight: 'bold', color: '#747D8C', marginBottom: 4 },
-  descriptionContent: { fontSize: 14, color: '#2F3542', lineHeight: 20 },
-  cardFooter:   { borderTopWidth: 1, borderTopColor: '#F1F2F6', paddingTop: 15 },
-  confirmBtn: {
-    backgroundColor: '#FF4757', flexDirection: 'row', alignItems: 'center',
-    justifyContent: 'center', padding: 14, borderRadius: 12, gap: 8,
-  },
-  confirmBtnDisabled: { backgroundColor: '#FF475799' },
-  confirmBtnText:  { color: '#FFFFFF', fontWeight: 'bold', fontSize: 14 },
-  confirmedBox: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    marginTop: 10, backgroundColor: '#E8F8F0', padding: 8, borderRadius: 8,
-  },
-  confirmedText:   { color: '#27AE60', fontSize: 13, fontWeight: '600', marginLeft: 5 },
-  emptyContainer:  { alignItems: 'center', justifyContent: 'center', marginTop: 80 },
-  emptyText:       { fontSize: 16, color: '#A4B0BE', marginTop: 15, marginBottom: 25, textAlign: 'center' },
-  newRequestBtn:   { backgroundColor: '#FF4757', paddingHorizontal: 25, paddingVertical: 12, borderRadius: 12 },
-  newRequestBtnText: { color: '#FFF', fontWeight: 'bold' },
+  container:    { flex: 1, backgroundColor: C.bg },
+  scroll:       { paddingHorizontal: 18, paddingBottom: 40 },
+  center:       { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
+
+  // State screens (login required / error)
+  stateIcon:    { width: 72, height: 72, borderRadius: 22, justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
+  stateTitle:   { fontSize: 18, fontWeight: '800', color: C.text, marginBottom: 8, letterSpacing: -0.3 },
+  stateSub:     { fontSize: 14, color: C.sub, textAlign: 'center', lineHeight: 22, marginBottom: 24 },
+  stateBtn:     { flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 24, paddingVertical: 13, borderRadius: 14, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.25, shadowRadius: 8, elevation: 5 },
+  stateBtnText: { color: C.white, fontWeight: '700', fontSize: 14 },
+
+  loadingText:  { marginTop: 12, color: C.sub, fontSize: 14 },
+
+  // Header
+  headerRow:    { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 20 },
+  headerTitle:  { fontSize: 24, fontWeight: '800', color: C.text, letterSpacing: -0.5 },
+  countBadge:   { backgroundColor: C.red, paddingHorizontal: 9, paddingVertical: 3, borderRadius: 10 },
+  countText:    { color: C.white, fontSize: 13, fontWeight: '800' },
+
+  // Empty
+  emptyWrap:    { alignItems: 'center', marginTop: 60, paddingHorizontal: 20 },
+  emptyIcon:    { width: 80, height: 80, borderRadius: 24, backgroundColor: C.slateLight, justifyContent: 'center', alignItems: 'center', marginBottom: 16, borderWidth: 1, borderColor: C.border },
+  emptyTitle:   { fontSize: 18, fontWeight: '700', color: C.text, marginBottom: 8 },
+  emptySub:     { fontSize: 14, color: C.sub, textAlign: 'center', lineHeight: 21, marginBottom: 24 },
+  newBtn:       { flexDirection: 'row', alignItems: 'center', gap: 7, backgroundColor: C.red, paddingHorizontal: 22, paddingVertical: 13, borderRadius: 14, shadowColor: C.red, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 5 },
+  newBtnText:   { color: C.white, fontWeight: '700', fontSize: 14 },
+
+  // Card
+  card:         { backgroundColor: C.white, borderRadius: 20, marginBottom: 14, borderWidth: 1, borderColor: C.border, shadowColor: '#0F172A', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 3, overflow: 'hidden' },
+  cardHead:     { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingTop: 14, paddingBottom: 12 },
+  statusBadge:  { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10 },
+  statusText:   { fontSize: 12, fontWeight: '700' },
+  reqId:        { fontSize: 12, color: C.muted, fontWeight: '600' },
+  divider:      { height: 1, backgroundColor: C.border, marginHorizontal: 16 },
+
+  cardBody:     { padding: 16, gap: 8 },
+  metaRow:      { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  metaText:     { fontSize: 13, color: C.sub, flex: 1 },
+  descBox:      { backgroundColor: C.bg, borderRadius: 12, padding: 12, marginTop: 4, borderWidth: 1, borderColor: C.border },
+  descLabel:    { fontSize: 11, fontWeight: '700', color: C.muted, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 },
+  descText:     { fontSize: 14, color: C.text, lineHeight: 21 },
+
+  confirmBtn:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: C.red, margin: 14, marginTop: 4, padding: 14, borderRadius: 14, shadowColor: C.red, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.25, shadowRadius: 6, elevation: 4 },
+  confirmText:  { color: C.white, fontWeight: '700', fontSize: 14 },
+
+  confirmedRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: C.greenLight, margin: 14, marginTop: 4, padding: 11, borderRadius: 12 },
+  confirmedText:{ color: C.green, fontSize: 13, fontWeight: '600' },
 });
 
 export default RequestStatusScreen;

@@ -16,9 +16,11 @@ import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../context/AuthContext';
 
+const API_URL = process.env.EXPO_PUBLIC_API_URL;
+
 const EditUserProfile = ({ navigation, route }) => {
   const insets = useSafeAreaInsets();
-  const { user, updateUser } = useAuth();
+  const { user, updateUser, getAuthHeaders } = useAuth();
 
   // Get user data from route params or use current user data
   const userData = route.params?.userData || user;
@@ -32,16 +34,11 @@ const EditUserProfile = ({ navigation, route }) => {
 
   const [errors, setErrors] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showModal, setShowModal] = useState(false);
+  const [modalData, setModalData] = useState({ type: 'success', title: '', message: '', onPress: () => setShowModal(false) });
 
   const validateForm = () => {
     const newErrors = {};
-
-    // Validate username
-    if (!formData.username.trim()) {
-      newErrors.username = 'Tên đăng nhập không được để trống';
-    } else if (formData.username.length < 3) {
-      newErrors.username = 'Tên đăng nhập phải có ít nhất 3 ký tự';
-    }
 
     // Validate full name
     if (!formData.fullName.trim()) {
@@ -55,6 +52,13 @@ const EditUserProfile = ({ navigation, route }) => {
       newErrors.phone = 'Số điện thoại không hợp lệ';
     }
 
+    if (formData.avatar && typeof formData.avatar === 'string') {
+      const isUrl = /^https?:\/\//i.test(formData.avatar) || formData.avatar.startsWith('file://');
+      if (!isUrl) {
+        newErrors.avatar = 'Liên kết ảnh không hợp lệ';
+      }
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -65,26 +69,45 @@ const EditUserProfile = ({ navigation, route }) => {
     setIsSubmitting(true);
 
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // Update user data in context
-      updateUser({
-        ...user,
-        username: formData.username,
-        name: formData.fullName,
-        phone: formData.phone,
-        avatar: formData.avatar
+      const response = await fetch(`${API_URL}/users/profile`, {
+        method: 'PATCH',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          fullName: formData.fullName,
+          phone: formData.phone,
+          avatar: formData.avatar || undefined,
+        }),
       });
 
-      Alert.alert('Thành công', 'Thông tin cá nhân đã được cập nhật!', [
-        {
-          text: 'OK',
-          onPress: () => navigation.goBack()
-        }
-      ]);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const message = data?.message || `Lỗi ${response.status}: Không thể cập nhật hồ sơ`;
+        throw new Error(message);
+      }
+
+      const updated = data?.data ?? data ?? {};
+      updateUser({
+        name: updated.name || updated.fullName || formData.fullName,
+        fullName: updated.fullName || updated.name || formData.fullName,
+        phone: updated.phone || formData.phone,
+        avatar: updated.avatar ?? formData.avatar ?? user?.avatar,
+      });
+
+      setModalData({
+        type: 'success',
+        title: 'Thành công',
+        message: 'Thông tin cá nhân đã được cập nhật!',
+        onPress: () => { setShowModal(false); navigation.goBack(); }
+      });
+      setShowModal(true);
     } catch (error) {
-      Alert.alert('Lỗi', 'Có lỗi xảy ra khi cập nhật thông tin');
+      setModalData({
+        type: 'error',
+        title: 'Lỗi',
+        message: error.message || 'Có lỗi xảy ra khi cập nhật thông tin',
+        onPress: () => setShowModal(false),
+      });
+      setShowModal(true);
     } finally {
       setIsSubmitting(false);
     }
@@ -218,14 +241,11 @@ const EditUserProfile = ({ navigation, route }) => {
             <TextInput
               style={[styles.input, errors.username && styles.inputError]}
               value={formData.username}
-              onChangeText={(value) => handleInputChange('username', value)}
+              editable={false}
               placeholder="Nhập tên đăng nhập"
               placeholderTextColor="#A4B0BE"
               autoCapitalize="none"
             />
-            {errors.username && (
-              <Text style={styles.errorText}>{errors.username}</Text>
-            )}
           </View>
 
           {/* Full Name Field */}
@@ -273,6 +293,21 @@ const EditUserProfile = ({ navigation, route }) => {
 
         <View style={{ height: 40 }} />
       </ScrollView>
+      
+      {showModal && (
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={[styles.modalIconWrap, modalData.type === 'success' ? { backgroundColor: '#E8FFF1' } : { backgroundColor: '#FFF0F1' }]}>
+              <Ionicons name={modalData.type === 'success' ? 'checkmark-circle' : 'alert-circle'} size={36} color={modalData.type === 'success' ? '#27AE60' : '#FF4757'} />
+            </View>
+            <Text style={styles.modalTitle}>{modalData.title}</Text>
+            <Text style={styles.modalMessage}>{modalData.message}</Text>
+            <TouchableOpacity style={[styles.modalConfirmBtn, modalData.type === 'success' ? { backgroundColor: '#27AE60' } : { backgroundColor: '#FF4757' }]} onPress={modalData.onPress}>
+              <Text style={styles.modalConfirmText}>OK</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
     </SafeAreaView>
   );
 };
@@ -421,6 +456,55 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     color: '#2F3542',
+  },
+  modalOverlay: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 30,
+  },
+  modalContainer: {
+    width: '100%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 24,
+    alignItems: 'center',
+  },
+  modalIconWrap: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 14,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#2F3542',
+    marginBottom: 6,
+  },
+  modalMessage: {
+    fontSize: 14,
+    color: '#57606F',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 16,
+  },
+  modalConfirmBtn: {
+    paddingVertical: 12,
+    paddingHorizontal: 28,
+    borderRadius: 12,
+  },
+  modalConfirmText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
 });
 
