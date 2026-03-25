@@ -5,6 +5,8 @@ import TeamHomeScreen from '../screens/team/TeamHomeScreen';
 import NearbyRequestsScreen from '../screens/team/NearbyRequestsScreen';
 import AssignedTaskScreen from '../screens/team/AssignedTaskScreen';
 import AssignedTaskDetailScreen from '../screens/team/AssignedTaskDetailScreen';
+import TeamDetail from '../screens/team/TeamDetail';
+import VehicleListScreen from '../screens/coordinator/VehicleListScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -15,6 +17,8 @@ const RescueTeamStack = () => {
       <Stack.Screen name="NearbyRequests" component={NearbyRequestsScreen} />
       <Stack.Screen name="AssignedMissions" component={AssignedTaskScreen} />
       <Stack.Screen name="AssignedTaskDetail" component={AssignedTaskDetailScreen} />
+      <Stack.Screen name="TeamDetail" component={TeamDetail} />
+      <Stack.Screen name="VehicleList" component={VehicleListScreen} options={{ headerShown: false }} />
     </Stack.Navigator>
   );
 };

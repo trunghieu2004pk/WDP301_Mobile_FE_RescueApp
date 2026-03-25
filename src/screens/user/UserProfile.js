@@ -5,7 +5,6 @@ import {
   StyleSheet,
   TouchableOpacity,
   ScrollView,
-  SafeAreaView,
   StatusBar,
   Image,
   Alert,
@@ -13,7 +12,7 @@ import {
   RefreshControl
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons, FontAwesome5 } from '@expo/vector-icons';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../context/AuthContext';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL;
@@ -92,7 +91,7 @@ const UserProfile = ({ navigation }) => {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView edges={['left','right','bottom']} style={styles.container}>
         <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#2E91FF" />
@@ -104,7 +103,7 @@ const UserProfile = ({ navigation }) => {
 
   if (error && !userData) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView edges={['left','right','bottom']} style={styles.container}>
         <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
         <View style={styles.errorContainer}>
           <Ionicons name="alert-circle-outline" size={48} color="#FF4757" />
@@ -119,7 +118,7 @@ const UserProfile = ({ navigation }) => {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView edges={['left','right','bottom']} style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
       
       <ScrollView 

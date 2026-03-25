@@ -84,19 +84,36 @@ const RescueRequestScreen = ({ navigation }) => {
   const handleMapPress = (e) => updateLocationState(e.nativeEvent.coordinate);
 
   const uploadSingleImage = async (uri) => {
-    const filename = uri.split('/').pop();
-    const ext      = filename.split('.').pop();
-    const mimeType = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : 'image/png';
+    const last = uri.split('/').pop() || 'photo.jpg';
+    const hasExt = last.includes('.');
+    const ext = hasExt ? last.split('.').pop().toLowerCase() : 'jpg';
+    const name = hasExt ? last : `${last}.jpg`;
+    const type =
+      ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' :
+      ext === 'png'                    ? 'image/png'  :
+      ext === 'webp'                   ? 'image/webp' :
+      ext === 'heic' || ext === 'heif'? 'image/jpeg' :
+      'image/jpeg';
+
     const formData = new FormData();
-    formData.append('file', { uri, name: filename, type: mimeType });
-    const response = await fetch(`${API_URL}/upload/image`, {
+    formData.append('file', { uri, name, type });
+
+    const auth = getAuthHeaders();
+    const headers = Object.fromEntries(
+      Object.entries(auth).filter(([k]) => k.toLowerCase() !== 'content-type')
+    );
+
+    const res = await fetch(`${API_URL}/upload/image`, {
       method: 'POST',
-      headers: { ...getAuthHeaders(), 'Content-Type': 'multipart/form-data' },
+      headers,
       body: formData,
     });
-    if (!response.ok) throw new Error('Upload ảnh thất bại');
-    const data = await response.json();
-    return data.url;
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data?.message || `Upload thất bại: ${res.status}`);
+    }
+    return data?.url || data?.data?.url;
   };
 
   const pickImage = async () => {
@@ -106,7 +123,10 @@ const RescueRequestScreen = ({ navigation }) => {
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'], allowsEditing: true, aspect: [4, 3], quality: 0.7,
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 0.7,
     });
     if (!result.canceled) setImages((prev) => [...prev, result.assets[0].uri]);
   };
@@ -118,7 +138,10 @@ const RescueRequestScreen = ({ navigation }) => {
       return;
     }
     const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ['images'], allowsEditing: true, aspect: [4, 3], quality: 0.7,
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 0.7,
     });
     if (!result.canceled) setImages((prev) => [...prev, result.assets[0].uri]);
   };
@@ -184,15 +207,14 @@ const RescueRequestScreen = ({ navigation }) => {
         return;
       }
 
-      // ✅ Sau khi thành công: popToTop dọn stack, rồi chuyển tab Trạng thái
       setModalData({
         type:    'success',
         title:   'Gửi thành công',
         message: 'Yêu cầu cứu hộ của bạn đã được gửi đi. Đội cứu hộ sẽ sớm liên lạc với bạn.',
         onPress: () => {
           setShowModal(false);
-          navigation.popToTop();           // ← xóa RescueRequestScreen khỏi HomeStack
-          navigation.navigate('Trạng thái'); // ← chuyển sang tab Trạng thái
+          navigation.popToTop();
+          navigation.navigate('Trạng thái');
         },
       });
       setShowModal(true);

@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  SafeAreaView,
   ActivityIndicator,
   Alert,
   ScrollView,
@@ -31,6 +30,9 @@ const URGENCY_MAP = {
   HIGH:   { label: 'Cao',        color: '#E74C3C' },
   URGENT: { label: 'Khẩn cấp',  color: '#FF4757' },
 };
+
+// Các status không hiển thị trên bản đồ
+const EXCLUDE_STATUSES = new Set(['COMPLETED', 'CANCELLED', 'REJECTED']);
 
 const getUrgency = (level) =>
   URGENCY_MAP[level] || { label: level || '—', color: '#A4B0BE' };
@@ -61,7 +63,7 @@ const getRequestCoords = (req) => {
 };
 
 const NearbyRequestsScreen = ({ route, navigation }) => {
-  const { getAuthHeaders } = useAuth();
+  const { user, getAuthHeaders } = useAuth();
   const insets = useSafeAreaInsets();
   const mapRef = useRef(null);
 
@@ -74,34 +76,86 @@ const NearbyRequestsScreen = ({ route, navigation }) => {
   const [showList, setShowList]               = useState(false);
   const [loadingLocation, setLoadingLocation] = useState(false);
   const [loadingRequests, setLoadingRequests] = useState(false);
+  const watchRef = useRef(null);
+
+  const paramTeamId = route?.params?.teamId || null;
 
   const initLocation = useCallback(async () => {
     setLoadingLocation(true);
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status === 'granted') {
-        const pos = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.High,
-          mayShowUserSettingsDialog: true,
-        });
+      if (status !== 'granted') {
+        setLocationLabel('Mặc định – Quận 9');
+        return;
+      }
+      const last = await Location.getLastKnownPositionAsync();
+      if (last?.coords) {
+        const coords = { latitude: last.coords.latitude, longitude: last.coords.longitude };
+        setUserLocation(coords);
+        setLocationLabel('Vị trí gần đây');
+        mapRef.current?.animateToRegion({ ...coords, latitudeDelta: 0.05, longitudeDelta: 0.05 }, 600);
+      } else {
+        const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
         const coords = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
         setUserLocation(coords);
         setLocationLabel('GPS thiết bị');
-        mapRef.current?.animateToRegion({ ...coords, latitudeDelta: 0.05, longitudeDelta: 0.05 }, 800);
+        mapRef.current?.animateToRegion({ ...coords, latitudeDelta: 0.05, longitudeDelta: 0.05 }, 600);
       }
-      // Không có quyền → giữ nguyên DEFAULT_LOCATION đã set sẵn trong state
+      watchRef.current = await Location.watchPositionAsync(
+        { accuracy: Location.Accuracy.Balanced, timeInterval: 5000, distanceInterval: 50 },
+        (update) => {
+          const coords = { latitude: update.coords.latitude, longitude: update.coords.longitude };
+          setUserLocation((prev) => {
+            if (!prev || Math.abs(prev.latitude - coords.latitude) > 1e-6 || Math.abs(prev.longitude - coords.longitude) > 1e-6) {
+              mapRef.current?.animateToRegion({ ...coords, latitudeDelta: 0.05, longitudeDelta: 0.05 }, 400);
+            }
+            return coords;
+          });
+          setLocationLabel('GPS thiết bị');
+        }
+      );
     } catch {
-      // Lỗi GPS → giữ nguyên DEFAULT_LOCATION
+      setLocationLabel('Mặc định – Quận 9');
     } finally {
       setLoadingLocation(false);
     }
   }, []);
 
-  const fetchAllRequests = useCallback(async () => {
+  const resolveTeamId = useCallback(async () => {
+    if (paramTeamId) return String(paramTeamId);
+    const direct =
+      user?.teamId ||
+      user?.team?._id || user?.team?.id ||
+      user?.rescueTeamId ||
+      user?.rescueTeam?._id || user?.rescueTeam?.id ||
+      user?.team_id ||
+      null;
+    if (direct) return String(direct);
+    if (!user?._id) return null;
+    const response = await fetch(`${API_URL}/rescue-teams`, {
+      method: 'GET',
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) return null;
+    const data = await response.json().catch(() => ({}));
+    const list = Array.isArray(data) ? data : data.data ?? data.teams ?? [];
+    const myTeam = list.find((t) => {
+      const lid = t?.leaderId?._id || t?.leaderId?.id || t?.leaderId;
+      return lid && String(lid) === String(user?._id || user?.id);
+    });
+    return myTeam?._id || myTeam?.id || null;
+  }, [paramTeamId, user, getAuthHeaders]);
+
+  const fetchAssignedRequests = useCallback(async () => {
     if (!userLocation) return;
     setLoadingRequests(true);
     try {
-      const response = await fetch(`${API_URL}/rescue-requests`, {
+      const teamId = await resolveTeamId();
+      if (!teamId) {
+        setAllRequests([]);
+        return;
+      }
+      const response = await fetch(`${API_URL}/rescue-requests/assigned-tasks?teamId=${teamId}`, {
         method: 'GET',
         headers: getAuthHeaders(),
       });
@@ -110,17 +164,24 @@ const NearbyRequestsScreen = ({ route, navigation }) => {
         throw new Error(data?.message || `Lỗi ${response.status}`);
       }
       const data = await response.json();
-      const list = Array.isArray(data) ? data : data.data ?? data.requests ?? data.items ?? [];
-      setAllRequests(list);
+      const list = Array.isArray(data) ? data : data.data ?? data.tasks ?? [];
+      const onlyInProgress = list.filter((r) => String(r?.status || '').toUpperCase() === 'IN_PROGRESS');
+      setAllRequests(onlyInProgress);
     } catch (err) {
       Alert.alert('Lỗi', err.message || 'Không thể tải danh sách yêu cầu.');
     } finally {
       setLoadingRequests(false);
     }
-  }, [userLocation]);
+  }, [userLocation, resolveTeamId, getAuthHeaders]);
 
-  useEffect(() => { initLocation(); }, []);
-  useEffect(() => { fetchAllRequests(); }, [userLocation]);
+  useEffect(() => {
+    initLocation();
+    return () => {
+      try { watchRef.current?.remove?.(); } catch {}
+      watchRef.current = null;
+    };
+  }, []);
+  useEffect(() => { fetchAssignedRequests(); }, [userLocation]);
 
   useEffect(() => {
     if (!userLocation || allRequests.length === 0) { setFiltered([]); return; }
@@ -218,12 +279,13 @@ const NearbyRequestsScreen = ({ route, navigation }) => {
         })}
       </MapView>
 
+      {/* ── Header ── */}
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
         <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={22} color="#2F3542" />
         </TouchableOpacity>
         <View style={styles.headerInfo}>
-          <Text style={styles.headerTitle} numberOfLines={1}>Yêu cầu cứu hộ gần đây</Text>
+          <Text style={styles.headerTitle} numberOfLines={1}>{'Yêu cầu cứu hộ gần đây'}</Text>
           <Text style={styles.headerSub}>
             {loadingRequests
               ? 'Đang quét yêu cầu...'
@@ -238,6 +300,7 @@ const NearbyRequestsScreen = ({ route, navigation }) => {
         }
       </View>
 
+      {/* ── Radius chips ── */}
       <View style={[styles.radiusBar, { top: insets.top + 68 }]}>
         {RADIUS_OPTIONS.map((r) => (
           <TouchableOpacity
@@ -252,6 +315,7 @@ const NearbyRequestsScreen = ({ route, navigation }) => {
         ))}
       </View>
 
+      {/* ── Location chip ── */}
       {userLocation && (
         <View style={[styles.locationChip, { top: insets.top + 108 }]}>
           <View style={[styles.locationDot, { backgroundColor: locationLabel.startsWith('GPS') ? '#27AE60' : '#F39C12' }]} />
@@ -259,6 +323,7 @@ const NearbyRequestsScreen = ({ route, navigation }) => {
         </View>
       )}
 
+      {/* ── Selected card ── */}
       {selectedRequest && !showList && (
         <View style={[styles.selectedCard, { bottom: insets.bottom + 100 }]}>
           <View style={styles.selectedCardHeader}>
@@ -268,7 +333,7 @@ const NearbyRequestsScreen = ({ route, navigation }) => {
               </Text>
             </View>
             <Text style={styles.selectedId}>
-              #{selectedRequest.requestCode || selectedRequest._id?.slice(-6)?.toUpperCase()}
+              {'#'}{selectedRequest.requestCode || selectedRequest._id?.slice(-6)?.toUpperCase()}
             </Text>
             <TouchableOpacity onPress={() => setSelectedRequest(null)}>
               <Ionicons name="close" size={20} color="#A4B0BE" />
@@ -280,19 +345,20 @@ const NearbyRequestsScreen = ({ route, navigation }) => {
           <View style={styles.selectedMeta}>
             <Ionicons name="navigate-outline" size={13} color="#FF4757" />
             <Text style={[styles.selectedMetaText, { color: '#FF4757', fontWeight: '600' }]}>
-              Cách vị trí hiện tại {formatDistance(selectedRequest.distance)}
+              {'Cách vị trí hiện tại '}{formatDistance(selectedRequest.distance)}
             </Text>
           </View>
           <TouchableOpacity
             style={styles.detailButton}
-            onPress={() => navigation.navigate('RequestDetail', { request: selectedRequest })}
+            onPress={() => navigation.navigate('AssignedTaskDetail', { request: selectedRequest })}
           >
             <Ionicons name="arrow-forward-circle" size={18} color="#FFF" />
-            <Text style={styles.detailButtonText}>Xem chi tiết</Text>
+            <Text style={styles.detailButtonText}>{'Xem chi tiết'}</Text>
           </TouchableOpacity>
         </View>
       )}
 
+      {/* ── List toggle ── */}
       <TouchableOpacity
         style={[styles.listToggleBtn, { bottom: insets.bottom + 40 }]}
         onPress={() => { setShowList(!showList); setSelectedRequest(null); }}
@@ -303,6 +369,7 @@ const NearbyRequestsScreen = ({ route, navigation }) => {
         </Text>
       </TouchableOpacity>
 
+      {/* ── List sheet ── */}
       {showList && (
         <View style={styles.listSheet}>
           <View style={styles.listHandle} />
@@ -310,43 +377,47 @@ const NearbyRequestsScreen = ({ route, navigation }) => {
           {filtered.length === 0 ? (
             <View style={styles.emptyList}>
               <Ionicons name="search-outline" size={40} color="#A4B0BE" />
-              <Text style={styles.emptyText}>Không có yêu cầu trong bán kính này</Text>
+              <Text style={styles.emptyText}>{'Không có yêu cầu trong bán kính này'}</Text>
             </View>
           ) : (
             <View style={{ flex: 1 }}>
-            <ScrollView
-              showsVerticalScrollIndicator={true}
-              nestedScrollEnabled={true}
-              keyboardShouldPersistTaps="handled"
-              contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}
-            >
-              {filtered.map((req) => {
-                const urgency = getUrgency(req.urgencyLevel);
-                return (
-                  <TouchableOpacity key={req._id || req.id} style={styles.listItem} onPress={() => focusRequest(req)}>
-                    <View style={styles.distanceCol}>
-                      <Text style={styles.distanceValue}>
-                        {req.distance >= 1000 ? `${(req.distance / 1000).toFixed(1)}` : `${Math.round(req.distance)}`}
-                      </Text>
-                      <Text style={styles.distanceUnit}>{req.distance >= 1000 ? 'km' : 'm'}</Text>
-                    </View>
-                    <View style={[styles.distanceLine, { backgroundColor: urgency.color }]} />
-                    <View style={styles.listItemInfo}>
-                      <View style={styles.listItemHeader}>
-                        <Text style={styles.listItemId}>#{req.requestCode || req._id?.slice(-6)?.toUpperCase()}</Text>
-                        <View style={[styles.urgencyBadge, { backgroundColor: urgency.color + '20' }]}>
-                          <Text style={[styles.urgencyText, { color: urgency.color }]}>{urgency.label}</Text>
-                        </View>
+              <ScrollView
+                showsVerticalScrollIndicator={true}
+                nestedScrollEnabled={true}
+                keyboardShouldPersistTaps="handled"
+                contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}
+              >
+                {filtered.map((req) => {
+                  const urgency = getUrgency(req.urgencyLevel);
+                  return (
+                    <TouchableOpacity
+                      key={req._id || req.id}
+                      style={styles.listItem}
+                      onPress={() => focusRequest(req)}
+                    >
+                      <View style={styles.distanceCol}>
+                        <Text style={styles.distanceValue}>
+                          {req.distance >= 1000 ? `${(req.distance / 1000).toFixed(1)}` : `${Math.round(req.distance)}`}
+                        </Text>
+                        <Text style={styles.distanceUnit}>{req.distance >= 1000 ? 'km' : 'm'}</Text>
                       </View>
-                      <Text style={styles.listItemDesc} numberOfLines={1}>
-                        {req.description || 'Không có mô tả'}
-                      </Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={18} color="#A4B0BE" />
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
+                      <View style={[styles.distanceLine, { backgroundColor: urgency.color }]} />
+                      <View style={styles.listItemInfo}>
+                        <View style={styles.listItemHeader}>
+                          <Text style={styles.listItemId}>{'#'}{req.requestCode || req._id?.slice(-6)?.toUpperCase()}</Text>
+                          <View style={[styles.urgencyBadge, { backgroundColor: urgency.color + '20' }]}>
+                            <Text style={[styles.urgencyText, { color: urgency.color }]}>{urgency.label}</Text>
+                          </View>
+                        </View>
+                        <Text style={styles.listItemDesc} numberOfLines={1}>
+                          {req.description || 'Không có mô tả'}
+                        </Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={18} color="#A4B0BE" />
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
             </View>
           )}
         </View>
@@ -449,7 +520,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFF', borderTopLeftRadius: 20, borderTopRightRadius: 20,
     paddingHorizontal: 16, paddingTop: 12,
     height: '60%',
-    display: 'flex',
     flexDirection: 'column',
     ...Platform.select({
       ios: { shadowColor: '#000', shadowOffset: { width: 0, height: -3 }, shadowOpacity: 0.1, shadowRadius: 8 },

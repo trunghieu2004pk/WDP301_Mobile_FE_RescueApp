@@ -44,6 +44,7 @@ const UpdateTeam = ({ route, navigation }) => {
 
   const [teamName, setTeamName] = useState('');
   const [status, setStatus] = useState('AVAILABLE');
+  const [originalStatus, setOriginalStatus] = useState('AVAILABLE');
   const [leaderId, setLeaderId] = useState('');
   const [members, setMembers] = useState([]);       // array of user objects
   const [vehicles, setVehicles] = useState([]);     // array of vehicle objects
@@ -75,6 +76,7 @@ const UpdateTeam = ({ route, navigation }) => {
 
       setTeamName(d.teamName || '');
       setStatus(d.status || 'AVAILABLE');
+      setOriginalStatus(d.status || 'AVAILABLE');
       setLeaderId(
         typeof d.leaderId === 'object' ? d.leaderId?._id || '' : d.leaderId || ''
       );
@@ -95,7 +97,9 @@ const UpdateTeam = ({ route, navigation }) => {
       });
       if (response.ok) {
         const data = await response.json();
-        setAllUsers(Array.isArray(data) ? data : data.data || data.users || []);
+        const list = Array.isArray(data) ? data : data.data || data.users || [];
+        const rescueUsers = (list || []).filter(u => (u.role || u.userRole) === 'RESCUE_TEAM');
+        setAllUsers(rescueUsers);
       }
     } catch (err) {
       console.error('Lỗi tải users:', err);
@@ -165,7 +169,6 @@ const UpdateTeam = ({ route, navigation }) => {
     try {
       const payload = {
         teamName: teamName.trim(),
-        status,
         leaderId: leaderId || null,
         members: members.map(getId),
         vehicles: vehicles.map(getId),
@@ -180,6 +183,19 @@ const UpdateTeam = ({ route, navigation }) => {
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
         throw new Error(errData.message || `Lỗi ${response.status}`);
+      }
+
+      // Cập nhật trạng thái nếu API riêng yêu cầu (AVAILABLE/OFFLINE)
+      if (status && ['AVAILABLE', 'OFFLINE'].includes(status) && status !== originalStatus) {
+        const statusRes = await fetch(`${API_URL}/rescue-teams/${teamId || team?._id || team?.id}/status`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+          body: JSON.stringify({ status }),
+        });
+        if (!statusRes.ok) {
+          const sErr = await statusRes.json().catch(() => ({}));
+          throw new Error(sErr.message || `Lỗi ${statusRes.status} khi cập nhật trạng thái`);
+        }
       }
 
       Alert.alert('Thành công', 'Cập nhật đội thành công!', [

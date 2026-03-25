@@ -97,6 +97,7 @@ const TeamListScreen = ({ navigation }) => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
+  const [teamStats, setTeamStats] = useState({});
 
   const fetchTeams = useCallback(async () => {
     try {
@@ -123,15 +124,46 @@ const TeamListScreen = ({ navigation }) => {
     }
   }, []);
 
+  const fetchTeamRequestStats = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_URL}/rescue-requests`, {
+        method: 'GET',
+        headers: getAuthHeaders(),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data?.message || `Lỗi ${response.status}`);
+      }
+      const data = await response.json();
+      const list = Array.isArray(data) ? data : data.data ?? data.items ?? data.requests ?? [];
+      const stats = {};
+      for (const r of list) {
+        const rawId = r?.assignedTeamId?._id || r?.assignedTeamId?.id || r?.assignedTeamId || r?.assignedTeam || null;
+        if (!rawId) continue;
+        const teamId = String(rawId);
+        if (!stats[teamId]) stats[teamId] = { assigned: 0, completed: 0 };
+        const status = String(r?.status || '').toUpperCase();
+        if (status === 'COMPLETED') stats[teamId].completed += 1;
+        else stats[teamId].assigned += 1;
+      }
+      setTeamStats(stats);
+    } catch (err) {
+      // Không chặn hiển thị danh sách đội nếu thống kê lỗi
+      console.warn('Không thể tải thống kê yêu cầu theo đội:', err?.message || err);
+    }
+  }, []);
+
   // Load lần đầu
   useEffect(() => {
     fetchTeams();
+    fetchTeamRequestStats();
   }, []);
 
   // ✅ Tự động re-fetch khi quay lại từ TeamDetail hoặc UpdateTeam
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
       fetchTeams();
+      fetchTeamRequestStats();
     });
     return unsubscribe;
   }, [navigation, fetchTeams]);
@@ -243,10 +275,10 @@ const TeamListScreen = ({ navigation }) => {
 
                   <View style={styles.cardFooter}>
                     <Text style={styles.assignedText}>
-                      Đã nhận: {team.assignedRequests || 0} yêu cầu
+                      Đã nhận: {(teamStats[team._id || team.id]?.assigned ?? team.assignedRequests ?? 0)}
                     </Text>
                     <Text style={styles.completedText}>
-                      Hoàn thành: {team.completedRequests || 0}
+                      Hoàn thành: {(teamStats[team._id || team.id]?.completed ?? team.completedRequests ?? 0)}
                     </Text>
                   </View>
                 </TouchableOpacity>

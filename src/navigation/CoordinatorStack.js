@@ -6,6 +6,8 @@ import RequestDetailScreen from '../screens/coordinator/RequestDetailScreen';
 import TeamListScreen from '../screens/coordinator/TeamListScreen';
 import TeamDetailScreen from '../screens/coordinator/TeamDetailScreen';
 import UpdateTeam from '../screens/coordinator/UpdateTeam';
+import DashboardScreen from '../screens/coordinator/DashboardScreen';
+import VehicleListScreen from '../screens/coordinator/VehicleListScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -14,6 +16,11 @@ const CoordinatorStack = () => (
     <Stack.Screen
       name="CoordinatorMain"
       component={CoordinatorHomeScreen}
+      options={{ headerShown: false }}
+    />
+    <Stack.Screen
+      name="Dashboard"
+      component={DashboardScreen}
       options={{ headerShown: false }}
     />
     <Stack.Screen
@@ -40,7 +47,12 @@ const CoordinatorStack = () => (
       name="UpdateTeam"
       component={UpdateTeam}
       options={{ headerShown: false }}
-    />   
+    />
+    <Stack.Screen
+      name="VehicleList"
+      component={VehicleListScreen}
+      options={{ headerShown: false }}
+    />
   </Stack.Navigator>
 );
 

@@ -1,8 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  StatusBar, ActivityIndicator, FlatList,
-  RefreshControl,
+  StatusBar, ActivityIndicator, RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
@@ -10,24 +9,12 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL;
 
-// ─── Design Tokens ────────────────────────────────────────────────────────────
 const C = {
-  red:        '#E8293A',
-  redLight:   '#FFF0F1',
-  redBorder:  '#FFCDD0',
-  blue:       '#2563EB',
-  blueLight:  '#EFF6FF',
-  blueBorder: '#BFDBFE',
-  green:      '#16A34A',
-  greenLight: '#F0FDF4',
-  amber:      '#D97706',
-  amberLight: '#FFFBEB',
-  text:       '#0F172A',
-  sub:        '#64748B',
-  muted:      '#94A3B8',
-  border:     '#E2E8F0',
-  bg:         '#F8FAFC',
-  white:      '#FFFFFF',
+  red: '#E8293A', redLight: '#FFF0F1', redBorder: '#FFCDD0',
+  blue: '#2563EB', blueLight: '#EFF6FF', blueBorder: '#BFDBFE',
+  green: '#16A34A', amber: '#D97706',
+  text: '#0F172A', sub: '#64748B', muted: '#94A3B8',
+  border: '#E2E8F0', bg: '#F8FAFC', white: '#FFFFFF',
 };
 
 const STATUS_MAP = {
@@ -37,27 +24,19 @@ const STATUS_MAP = {
   ON_MISSION: { label: 'Đang làm nhiệm vụ', color: C.blue,  icon: 'boat-outline' },
 };
 
-const getStatusInfo = (status) =>
-  STATUS_MAP[status] || { label: status || '—', color: C.muted, icon: 'help-circle-outline' };
-
-const TeamDetailScreen = ({ route, navigation }) => {
+const TeamDetail = ({ route, navigation }) => {
   const insets = useSafeAreaInsets();
-  const { getAuthHeaders } = useAuth();
+  const { user, getAuthHeaders } = useAuth();
 
-  // ── Lấy params an toàn ── //
-  const routeTeamId = route?.params?.teamId ?? null;
-  const routeTeam   = route?.params?.team   ?? null;
-
-  const [teamData, setTeamData]     = useState(routeTeam || null);
+  const [team, setTeam]             = useState(null);
   const [loading, setLoading]       = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError]           = useState(null);
 
-  const fetchTeamDetail = useCallback(async () => {
-    const id = routeTeamId || routeTeam?._id || routeTeam?.id;
-
-    if (!id) {
-      setError('Không tìm thấy ID đội cứu hộ. Vui lòng thử lại từ màn hình chính.');
+  const fetchTeam = useCallback(async () => {
+    const userId = user?._id || user?.id;
+    if (!userId) {
+      setError('Không xác định được tài khoản. Vui lòng đăng nhập lại.');
       setLoading(false);
       setRefreshing(false);
       return;
@@ -65,34 +44,57 @@ const TeamDetailScreen = ({ route, navigation }) => {
 
     try {
       setError(null);
-      const response = await fetch(`${API_URL}/rescue-teams/${id}`, {
+
+      // ── Bước 1: Lấy toàn bộ danh sách đội ──
+      const listRes = await fetch(`${API_URL}/rescue-teams`, {
         method: 'GET',
         headers: getAuthHeaders(),
       });
+      const listData = await listRes.json().catch(() => ({}));
+      if (!listRes.ok) throw new Error(listData?.message || `Lỗi ${listRes.status}`);
 
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(data?.message || `Lỗi ${response.status}`);
+      const list = Array.isArray(listData)
+        ? listData
+        : listData?.data ?? listData?.teams ?? listData?.items ?? [];
+
+      // ── Bước 2: Tìm team có leaderId trùng với user đang đăng nhập ──
+      const myTeam = list.find((t) => {
+        const lid = t?.leaderId?._id || t?.leaderId?.id || t?.leaderId;
+        return String(lid) === String(userId);
+      });
+
+      if (!myTeam) {
+        setError('Bạn chưa được phân công làm trưởng đội nào.');
+        setLoading(false);
+        setRefreshing(false);
+        return;
       }
 
-      const data = await response.json();
-      setTeamData(data?.data ?? data);
-    } catch (err) {
-      setError(err.message || 'Không thể tải thông tin đội cứu hộ.');
+      // ── Bước 3: Lấy chi tiết đội bằng _id tìm được ──
+      const teamId = myTeam._id || myTeam.id;
+      const detailRes = await fetch(`${API_URL}/rescue-teams/${teamId}`, {
+        method: 'GET',
+        headers: getAuthHeaders(),
+      });
+      const detailData = await detailRes.json().catch(() => ({}));
+      if (!detailRes.ok) throw new Error(detailData?.message || `Lỗi ${detailRes.status}`);
+
+      setTeam(detailData?.data ?? detailData);
+    } catch (e) {
+      setError(e.message || 'Không thể tải thông tin đội.');
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [routeTeamId, routeTeam, getAuthHeaders]);
+  }, [user, getAuthHeaders]);
 
-  useEffect(() => { fetchTeamDetail(); }, []);
-
+  useEffect(() => { fetchTeam(); }, [fetchTeam]);
   useEffect(() => {
-    const unsub = navigation.addListener('focus', fetchTeamDetail);
+    const unsub = navigation.addListener('focus', fetchTeam);
     return unsub;
-  }, [navigation, fetchTeamDetail]);
+  }, [navigation, fetchTeam]);
 
-  const onRefresh = () => { setRefreshing(true); fetchTeamDetail(); };
+  const onRefresh = () => { setRefreshing(true); fetchTeam(); };
 
   // ─── Loading ──────────────────────────────────────────────────────────────
   if (loading) {
@@ -103,7 +105,7 @@ const TeamDetailScreen = ({ route, navigation }) => {
           <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
             <Ionicons name="arrow-back" size={20} color={C.text} />
           </TouchableOpacity>
-          <Text style={styles.topBarTitle}>{'Chi tiết đội cứu hộ'}</Text>
+          <Text style={styles.topBarTitle}>{'Thông tin đội'}</Text>
           <View style={{ width: 40 }} />
         </View>
         <View style={styles.center}>
@@ -115,7 +117,7 @@ const TeamDetailScreen = ({ route, navigation }) => {
   }
 
   // ─── Error ────────────────────────────────────────────────────────────────
-  if (error || !teamData) {
+  if (error || !team) {
     return (
       <SafeAreaView edges={['left','right','bottom']} style={styles.container}>
         <StatusBar barStyle="dark-content" backgroundColor={C.white} />
@@ -123,7 +125,7 @@ const TeamDetailScreen = ({ route, navigation }) => {
           <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
             <Ionicons name="arrow-back" size={20} color={C.text} />
           </TouchableOpacity>
-          <Text style={styles.topBarTitle}>{'Chi tiết đội cứu hộ'}</Text>
+          <Text style={styles.topBarTitle}>{'Thông tin đội'}</Text>
           <View style={{ width: 40 }} />
         </View>
         <View style={styles.center}>
@@ -132,7 +134,7 @@ const TeamDetailScreen = ({ route, navigation }) => {
           </View>
           <Text style={styles.errorTitle}>{'Không thể tải dữ liệu'}</Text>
           <Text style={styles.errorMsg}>{error || 'Không tìm thấy thông tin đội'}</Text>
-          <TouchableOpacity style={styles.retryBtn} onPress={fetchTeamDetail}>
+          <TouchableOpacity style={styles.retryBtn} onPress={fetchTeam}>
             <Ionicons name="refresh-outline" size={16} color={C.white} />
             <Text style={styles.retryBtnText}>{'Thử lại'}</Text>
           </TouchableOpacity>
@@ -142,28 +144,19 @@ const TeamDetailScreen = ({ route, navigation }) => {
   }
 
   // ─── Main ─────────────────────────────────────────────────────────────────
-  const statusInfo = getStatusInfo(teamData.status);
-  const members    = teamData.members || [];
+  const statusInfo = STATUS_MAP[team.status] || { label: team.status || '—', color: C.muted, icon: 'help-circle-outline' };
+  const members    = Array.isArray(team.members) ? team.members : [];
 
   return (
     <SafeAreaView edges={['left','right','bottom']} style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor={C.white} />
 
-      {/* Top bar */}
       <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
         <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={20} color={C.text} />
         </TouchableOpacity>
-        <Text style={styles.topBarTitle}>{'Chi tiết đội cứu hộ'}</Text>
-        <TouchableOpacity
-          style={styles.editBtn}
-          onPress={() => navigation.navigate('UpdateTeam', {
-            teamId: routeTeamId || teamData._id || teamData.id,
-            team: teamData,
-          })}
-        >
-          <Ionicons name="create-outline" size={20} color={C.blue} />
-        </TouchableOpacity>
+        <Text style={styles.topBarTitle}>{'Thông tin đội'}</Text>
+        <View style={{ width: 40 }} />
       </View>
 
       <ScrollView
@@ -171,37 +164,26 @@ const TeamDetailScreen = ({ route, navigation }) => {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.blue} />}
       >
         {/* ── Team card ── */}
-        <View style={styles.teamCard}>
-          {/* Team name + status */}
-          <View style={styles.teamCardHeader}>
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
             <View style={{ flex: 1 }}>
-              <Text style={styles.teamName}>{teamData.teamName || 'Unnamed Team'}</Text>
+              <Text style={styles.teamName}>{team.teamName || 'Đội cứu hộ'}</Text>
               <Text style={styles.teamCode}>
-                {'#'}{teamData.teamCode || (teamData._id || teamData.id)?.slice(-8)?.toUpperCase()}
+                {'#'}{team.teamCode || (team._id || team.id)?.slice(-8)?.toUpperCase()}
               </Text>
             </View>
-            <View style={[styles.statusPill, { backgroundColor: statusInfo.color + '18' }]}>
+            <View style={[styles.pill, { backgroundColor: statusInfo.color + '18' }]}>
               <Ionicons name={statusInfo.icon} size={13} color={statusInfo.color} />
-              <Text style={[styles.statusPillText, { color: statusInfo.color }]}>
-                {statusInfo.label}
-              </Text>
+              <Text style={[styles.pillText, { color: statusInfo.color }]}>{statusInfo.label}</Text>
             </View>
           </View>
 
-          {/* Divider */}
           <View style={styles.divider} />
 
-          {/* Detail rows */}
           <View style={styles.detailList}>
-            {teamData.description && (
-              <DetailRow icon="document-text-outline" value={teamData.description} />
-            )}
-            {teamData.contactPhone && (
-              <DetailRow icon="call-outline" value={teamData.contactPhone} />
-            )}
-            {teamData.email && (
-              <DetailRow icon="mail-outline" value={teamData.email} />
-            )}
+            {team.description ? <DetailRow icon="document-text-outline" value={team.description} /> : null}
+            {team.contactPhone ? <DetailRow icon="call-outline" value={team.contactPhone} /> : null}
+            {team.email ? <DetailRow icon="mail-outline" value={team.email} /> : null}
             <DetailRow icon="people-outline" value={`${members.length} thành viên`} />
           </View>
         </View>
@@ -211,35 +193,32 @@ const TeamDetailScreen = ({ route, navigation }) => {
           <Text style={styles.sectionTitle}>{'Thành viên đội'}</Text>
 
           {members.length === 0 ? (
-            <View style={styles.emptyCard}>
-              <Ionicons name="people-outline" size={40} color={C.muted} />
+            <View style={styles.emptyBox}>
+              <Ionicons name="people-outline" size={44} color={C.muted} />
               <Text style={styles.emptyText}>{'Chưa có thành viên nào'}</Text>
             </View>
           ) : (
-            <FlatList
-              data={members}
-              keyExtractor={(item, i) => item._id || item.id || `m-${i}`}
-              scrollEnabled={false}
-              renderItem={({ item }) => (
-                <View style={styles.memberCard}>
+            <View style={{ gap: 10 }}>
+              {members.map((m, i) => (
+                <View key={m._id || m.id || `m-${i}`} style={styles.memberCard}>
                   <View style={styles.memberAvatar}>
                     <Text style={styles.memberAvatarLetter}>
-                      {(item.fullName ?? '?').charAt(0).toUpperCase()}
+                      {(m.fullName || m.username || '?').charAt(0).toUpperCase()}
                     </Text>
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.memberName}>{item.fullName || 'Thành viên'}</Text>
-                    <Text style={styles.memberRole}>{item.role || 'Thành viên'}</Text>
-                    {item.phone && (
+                    <Text style={styles.memberName}>{m.fullName || m.username || 'Thành viên'}</Text>
+                    <Text style={styles.memberRole}>{m.role || 'Thành viên'}</Text>
+                    {m.phone ? (
                       <View style={styles.memberPhoneRow}>
-                        <Ionicons name="call-outline" size={11} color={C.muted} />
-                        <Text style={styles.memberPhone}>{item.phone}</Text>
+                        <Ionicons name="call-outline" size={12} color={C.muted} />
+                        <Text style={styles.memberPhone}>{m.phone}</Text>
                       </View>
-                    )}
+                    ) : null}
                   </View>
                 </View>
-              )}
-            />
+              ))}
+            </View>
           )}
         </View>
 
@@ -252,7 +231,7 @@ const TeamDetailScreen = ({ route, navigation }) => {
 // ─── Sub-component ────────────────────────────────────────────────────────────
 const DetailRow = ({ icon, value }) => (
   <View style={styles.detailRow}>
-    <View style={styles.detailIconWrap}>
+    <View style={styles.detailIcon}>
       <Ionicons name={icon} size={15} color={C.sub} />
     </View>
     <Text style={styles.detailValue}>{value}</Text>
@@ -263,13 +242,10 @@ const DetailRow = ({ icon, value }) => (
 const styles = StyleSheet.create({
   container:          { flex: 1, backgroundColor: C.bg },
 
-  // Top bar
   topBar:             { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingBottom: 12, backgroundColor: C.white, borderBottomWidth: 1, borderBottomColor: C.border },
   backBtn:            { width: 40, height: 40, borderRadius: 12, backgroundColor: C.bg, borderWidth: 1, borderColor: C.border, justifyContent: 'center', alignItems: 'center' },
-  editBtn:            { width: 40, height: 40, borderRadius: 12, backgroundColor: C.blueLight, borderWidth: 1, borderColor: C.blueBorder, justifyContent: 'center', alignItems: 'center' },
   topBarTitle:        { fontSize: 17, fontWeight: '800', color: C.text, letterSpacing: -0.3 },
 
-  // Center states
   center:             { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 },
   loadingText:        { marginTop: 12, fontSize: 14, color: C.muted, fontWeight: '500' },
   errorIconWrap:      { width: 64, height: 64, borderRadius: 20, backgroundColor: C.redLight, justifyContent: 'center', alignItems: 'center', marginBottom: 12 },
@@ -278,25 +254,22 @@ const styles = StyleSheet.create({
   retryBtn:           { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: C.blue, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 14 },
   retryBtnText:       { color: C.white, fontWeight: '700', fontSize: 14 },
 
-  // Team card
-  teamCard:           { margin: 16, backgroundColor: C.white, borderRadius: 20, padding: 20, borderWidth: 1, borderColor: C.border, shadowColor: '#0F172A', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 3 },
-  teamCardHeader:     { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 16 },
+  card:               { margin: 16, backgroundColor: C.white, borderRadius: 20, padding: 20, borderWidth: 1, borderColor: C.border, shadowColor: '#0F172A', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 3 },
+  cardHeader:         { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 4 },
   teamName:           { fontSize: 20, fontWeight: '800', color: C.text, letterSpacing: -0.4, marginBottom: 4 },
   teamCode:           { fontSize: 13, color: C.muted, fontWeight: '600' },
-  statusPill:         { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10 },
-  statusPillText:     { fontSize: 12, fontWeight: '700' },
-  divider:            { height: 1, backgroundColor: C.border, marginBottom: 16 },
+  pill:               { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10 },
+  pillText:           { fontSize: 12, fontWeight: '700' },
+  divider:            { height: 1, backgroundColor: C.border, marginVertical: 16 },
   detailList:         { gap: 12 },
   detailRow:          { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  detailIconWrap:     { width: 30, height: 30, borderRadius: 8, backgroundColor: C.bg, justifyContent: 'center', alignItems: 'center' },
+  detailIcon:         { width: 30, height: 30, borderRadius: 8, backgroundColor: C.bg, justifyContent: 'center', alignItems: 'center' },
   detailValue:        { fontSize: 14, color: C.sub, flex: 1, lineHeight: 20 },
 
-  // Section
   section:            { paddingHorizontal: 16, marginTop: 4 },
   sectionTitle:       { fontSize: 17, fontWeight: '800', color: C.text, letterSpacing: -0.3, marginBottom: 12 },
 
-  // Member card
-  memberCard:         { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: C.white, padding: 14, borderRadius: 16, marginBottom: 10, borderWidth: 1, borderColor: C.border, shadowColor: '#0F172A', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 4, elevation: 1 },
+  memberCard:         { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: C.white, padding: 14, borderRadius: 16, borderWidth: 1, borderColor: C.border, shadowColor: '#0F172A', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 4, elevation: 1 },
   memberAvatar:       { width: 44, height: 44, borderRadius: 13, backgroundColor: C.blue + '18', justifyContent: 'center', alignItems: 'center' },
   memberAvatarLetter: { fontSize: 18, fontWeight: '800', color: C.blue },
   memberName:         { fontSize: 15, fontWeight: '700', color: C.text, marginBottom: 2 },
@@ -304,9 +277,8 @@ const styles = StyleSheet.create({
   memberPhoneRow:     { flexDirection: 'row', alignItems: 'center', gap: 4 },
   memberPhone:        { fontSize: 12, color: C.muted },
 
-  // Empty
-  emptyCard:          { backgroundColor: C.white, borderRadius: 18, padding: 40, alignItems: 'center', borderWidth: 1, borderColor: C.border },
+  emptyBox:           { alignItems: 'center', justifyContent: 'center', padding: 40, backgroundColor: C.white, borderRadius: 18, borderWidth: 1, borderColor: C.border },
   emptyText:          { marginTop: 12, fontSize: 14, color: C.muted, fontWeight: '500' },
 });
 
-export default TeamDetailScreen;
+export default TeamDetail;

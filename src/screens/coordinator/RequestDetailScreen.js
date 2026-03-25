@@ -99,6 +99,12 @@ const RequestDetailScreen = ({ route, navigation }) => {
   const [selectedTeam, setSelectedTeam] = useState(null);
 
   const [selectedEmergency, setSelectedEmergency] = useState('');
+  const [vehicles, setVehicles] = useState([]);
+  const [vehiclesLoading, setVehiclesLoading] = useState(false);
+  const [selectedVehicle, setSelectedVehicle] = useState(null);
+  const [inventories, setInventories] = useState([]);
+  const [inventoriesLoading, setInventoriesLoading] = useState(false);
+  const [suppliesDraft, setSuppliesDraft] = useState({});
 
   // ─── Reverse geocode ──────────────────────────────────────────────────────
   const reverseGeocode = async (req) => {
@@ -159,7 +165,6 @@ const RequestDetailScreen = ({ route, navigation }) => {
       const data = await response.json();
       setRequest(prev => ({ ...prev, status: 'VERIFIED', ...(data?.data ?? data) }));
       Alert.alert('Thành công', 'Yêu cầu đã được xác minh');
-      // ✅ List sẽ tự refresh qua focus listener khi user quay lại
     } catch (error) {
       Alert.alert('Lỗi', error.message || 'Không thể xác minh yêu cầu');
     } finally {
@@ -171,7 +176,7 @@ const RequestDetailScreen = ({ route, navigation }) => {
   const fetchTeams = async () => {
     setTeamsLoading(true);
     try {
-      const response = await fetch(`${API_URL}/rescue-teams`, {
+      const response = await fetch(`${API_URL}/rescue-teams/available`, {
         method: 'GET',
         headers: getAuthHeaders(),
       });
@@ -179,9 +184,45 @@ const RequestDetailScreen = ({ route, navigation }) => {
       const data = await response.json();
       setTeams(data?.data ?? data);
     } catch (error) {
-      Alert.alert('Lỗi', 'Không thể tải danh sách đội cứu hộ');
+      Alert.alert('Lỗi', 'Không thể tải danh sách đội sẵn sàng');
     } finally {
       setTeamsLoading(false);
+    }
+  };
+
+  const fetchVehicles = async () => {
+    setVehiclesLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/vehicles/available`, {
+        method: 'GET',
+        headers: getAuthHeaders(),
+      });
+      if (!response.ok) throw new Error(`Lỗi ${response.status}`);
+      const data = await response.json();
+      const list = Array.isArray(data) ? data : data?.data ?? data?.vehicles ?? [];
+      setVehicles(list);
+    } catch (error) {
+      Alert.alert('Lỗi', 'Không thể tải danh sách phương tiện');
+    } finally {
+      setVehiclesLoading(false);
+    }
+  };
+
+  const fetchInventories = async () => {
+    setInventoriesLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/inventories`, {
+        method: 'GET',
+        headers: getAuthHeaders(),
+      });
+      if (!response.ok) throw new Error(`Lỗi ${response.status}`);
+      const data = await response.json();
+      const list = Array.isArray(data) ? data : data?.data ?? data?.items ?? [];
+      setInventories(list);
+    } catch (error) {
+      Alert.alert('Lỗi', 'Không thể tải kho vật tư');
+    } finally {
+      setInventoriesLoading(false);
     }
   };
 
@@ -189,9 +230,10 @@ const RequestDetailScreen = ({ route, navigation }) => {
     setSelectedTeam(null);
     setShowAssignModal(true);
     fetchTeams();
+    fetchVehicles();
+    fetchInventories();
   };
 
-  // ─── Assign team ──────────────────────────────────────────────────────────
   // ─── Assign team ──────────────────────────────────────────────────────────
   const assignToTeam = async () => {
     if (!selectedTeam) return;
@@ -199,11 +241,18 @@ const RequestDetailScreen = ({ route, navigation }) => {
     try {
       const id = request._id || request.id;
 
-      // 1. Gán đội cứu hộ
+      const supplies = Object.entries(suppliesDraft)
+        .map(([inventoryId, quantity]) => ({ inventoryId, quantity }))
+        .filter((s) => s.quantity > 0);
+
       const assignResponse = await fetch(`${API_URL}/rescue-requests/${id}/assign`, {
         method: 'PATCH',
         headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ teamId: selectedTeam._id }),
+        body: JSON.stringify({
+          teamId: selectedTeam?._id || selectedTeam?.id || selectedTeam,
+          vehicleId: selectedVehicle?._id || selectedVehicle?.id || selectedVehicle || null,
+          supplies,
+        }),
       });
       if (!assignResponse.ok) {
         const data = await assignResponse.json().catch(() => ({}));
@@ -211,7 +260,6 @@ const RequestDetailScreen = ({ route, navigation }) => {
       }
       const assignData = await assignResponse.json();
 
-      // 2. Tự động cập nhật trạng thái sang IN_PROGRESS
       const statusResponse = await fetch(`${API_URL}/rescue-requests/${id}/status`, {
         method: 'PATCH',
         headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
@@ -219,7 +267,6 @@ const RequestDetailScreen = ({ route, navigation }) => {
       });
       if (!statusResponse.ok) {
         const data = await statusResponse.json().catch(() => ({}));
-        // Không throw — gán đội đã thành công, chỉ log lỗi cập nhật status
         console.warn('Cập nhật trạng thái thất bại:', data?.message);
       }
       const statusData = statusResponse.ok ? await statusResponse.json() : {};
@@ -235,6 +282,8 @@ const RequestDetailScreen = ({ route, navigation }) => {
       setShowConfirmAssignModal(false);
       setShowAssignModal(false);
       setSelectedTeam(null);
+      setSelectedVehicle(null);
+      setSuppliesDraft({});
       Alert.alert('Thành công', `Đã gán yêu cầu cho ${selectedTeam.teamName} và chuyển sang đang xử lý`);
     } catch (error) {
       Alert.alert('Lỗi', error.message || 'Không thể gán yêu cầu');
@@ -262,7 +311,6 @@ const RequestDetailScreen = ({ route, navigation }) => {
       setShowEmergencyModal(false);
       setSelectedEmergency('');
       Alert.alert('Thành công', 'Đã cập nhật mức độ khẩn cấp');
-      // ✅ List sẽ tự refresh qua focus listener khi user quay lại
     } catch (error) {
       Alert.alert('Lỗi', error.message || 'Không thể cập nhật mức độ khẩn cấp');
     } finally {
@@ -506,7 +554,7 @@ const RequestDetailScreen = ({ route, navigation }) => {
                   return (
                     <TouchableOpacity
                       style={[styles.teamItem, isCurrent && styles.teamItemActive]}
-                      onPress={() => { setSelectedTeam(item); setShowConfirmAssignModal(true); }}
+                      onPress={() => { setSelectedTeam(item); setShowAssignModal(false); setShowConfirmAssignModal(true); }}
                     >
                       <View style={styles.teamItemLeft}>
                         <View style={[styles.teamAvatar, isCurrent && styles.teamAvatarActive]}>
@@ -532,7 +580,7 @@ const RequestDetailScreen = ({ route, navigation }) => {
         </View>
       </Modal>
 
-      {/* Modal: Confirm gán đội */}
+      {/* Modal: Confirm gán đội — dùng .map() thay FlatList để tránh lỗi nested */}
       <Modal visible={showConfirmAssignModal} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -540,14 +588,100 @@ const RequestDetailScreen = ({ route, navigation }) => {
               <Ionicons name="people-circle-outline" size={56} color="#2E91FF" />
             </View>
             <Text style={styles.modalTitle}>Xác nhận phân công</Text>
-            <Text style={styles.confirmDesc}>
-              Gán yêu cầu{' '}
-              <Text style={{ fontWeight: 'bold', color: '#2F3542' }}>
-                #{request?.requestCode || request?._id?.slice(-8)?.toUpperCase()}
+
+            <ScrollView style={{ maxHeight: 360 }} contentContainerStyle={{ paddingBottom: 12 }}>
+              <Text style={styles.confirmDesc}>
+                Gán yêu cầu{' '}
+                <Text style={{ fontWeight: 'bold', color: '#2F3542' }}>
+                  #{request?.requestCode || request?._id?.slice(-8)?.toUpperCase()}
+                </Text>
+                {' '}cho đội{' '}
+                <Text style={{ fontWeight: 'bold', color: '#2E91FF' }}>{selectedTeam?.teamName}</Text>?
               </Text>
-              {' '}cho đội{' '}
-              <Text style={{ fontWeight: 'bold', color: '#2E91FF' }}>{selectedTeam?.teamName}</Text>?
-            </Text>
+
+              {/* ── Chọn phương tiện ── */}
+              <View style={{ marginTop: 16 }}>
+                <Text style={styles.sectionTitle}>Chọn phương tiện</Text>
+                {vehiclesLoading ? (
+                  <ActivityIndicator size="small" color="#2E91FF" />
+                ) : vehicles.length === 0 ? (
+                  <Text style={{ color: '#A4B0BE', fontSize: 13 }}>Không có phương tiện</Text>
+                ) : (
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    <View style={{ flexDirection: 'row', gap: 8 }}>
+                      {vehicles.map((item, idx) => {
+                        const label = item?.name || item?.plateNumber || item?.plate || item?.type || 'Phương tiện';
+                        const isSel =
+                          (selectedVehicle?._id || selectedVehicle?.id) === (item?._id || item?.id);
+                        return (
+                          <TouchableOpacity
+                            key={item?._id || item?.id || String(idx)}
+                            style={[styles.vehicleChip, isSel && styles.vehicleChipActive]}
+                            onPress={() => setSelectedVehicle(item)}
+                          >
+                            <Text style={[styles.vehicleChipText, isSel && { color: '#FFFFFF' }]}>
+                              {label}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </ScrollView>
+                )}
+              </View>
+
+              {/* ── Vật tư kèm theo ── */}
+              <View style={{ marginTop: 16 }}>
+                <Text style={styles.sectionTitle}>Vật tư kèm theo</Text>
+                {inventoriesLoading ? (
+                  <ActivityIndicator size="small" color="#2E91FF" />
+                ) : inventories.length === 0 ? (
+                  <Text style={{ color: '#A4B0BE', fontSize: 13 }}>Không có vật tư</Text>
+                ) : (
+                  <View>
+                    {inventories.map((item, idx) => {
+                      const label = item?.itemName || item?.name || item?.title || 'Vật tư';
+                      const id = item?._id || item?.id;
+                      const qty = suppliesDraft[id] || 0;
+                      return (
+                        <View key={id || String(idx)}>
+                          <View style={styles.supplyRow}>
+                            <Text style={styles.supplyLabel}>{label}</Text>
+                            <View style={styles.supplyControls}>
+                              <TouchableOpacity
+                                style={styles.qtyBtn}
+                                onPress={() =>
+                                  setSuppliesDraft(prev => ({
+                                    ...prev,
+                                    [id]: Math.max(0, (prev[id] || 0) - 1),
+                                  }))
+                                }
+                              >
+                                <Ionicons name="remove" size={16} color="#2E91FF" />
+                              </TouchableOpacity>
+                              <Text style={styles.qtyText}>{qty}</Text>
+                              <TouchableOpacity
+                                style={styles.qtyBtn}
+                                onPress={() =>
+                                  setSuppliesDraft(prev => ({
+                                    ...prev,
+                                    [id]: (prev[id] || 0) + 1,
+                                  }))
+                                }
+                              >
+                                <Ionicons name="add" size={16} color="#2E91FF" />
+                              </TouchableOpacity>
+                            </View>
+                          </View>
+                          {idx < inventories.length - 1 && <View style={styles.separator} />}
+                        </View>
+                      );
+                    })}
+                  </View>
+                )}
+              </View>
+            </ScrollView>
+
             <View style={styles.modalButtons}>
               <TouchableOpacity
                 style={[styles.modalButton, styles.cancelButton]}
@@ -701,6 +835,14 @@ const styles = StyleSheet.create({
   emergencyOption: { padding: 16, borderRadius: 8, marginBottom: 8, alignItems: 'center' },
   emergencyOptionText: { fontSize: 16, fontWeight: '600' },
   loadingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center' },
+  vehicleChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16, borderWidth: 1, borderColor: '#2E91FF' },
+  vehicleChipActive: { backgroundColor: '#2E91FF' },
+  vehicleChipText: { color: '#2E91FF', fontSize: 13, fontWeight: '600' },
+  supplyRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8 },
+  supplyLabel: { fontSize: 14, color: '#2F3542', flex: 1, marginRight: 10 },
+  supplyControls: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  qtyBtn: { paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: '#2E91FF', borderRadius: 8 },
+  qtyText: { minWidth: 20, textAlign: 'center', fontSize: 14, color: '#2F3542' },
 });
 
 export default RequestDetailScreen;
