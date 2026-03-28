@@ -1,10 +1,10 @@
 import React, { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  SafeAreaView, Alert, ActivityIndicator, RefreshControl,
+  Alert, ActivityIndicator, RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../../context/AuthContext';
 
@@ -115,7 +115,7 @@ const RequestStatusScreen = ({ navigation }) => {
   // ─── Chưa đăng nhập ───────────────────────────────────────────────────────
   if (!user) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView edges={['left','right','bottom']} style={styles.container}>
         <View style={styles.center}>
           <View style={[styles.stateIcon, { backgroundColor: C.blueLight }]}>
             <Ionicons name="lock-closed-outline" size={36} color={C.blue} />
@@ -139,7 +139,7 @@ const RequestStatusScreen = ({ navigation }) => {
   // ─── Loading ──────────────────────────────────────────────────────────────
   if (loading && !refreshing) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView edges={['left','right','bottom']} style={styles.container}>
         <View style={styles.center}>
           <ActivityIndicator size="large" color={C.red} />
           <Text style={styles.loadingText}>Đang tải yêu cầu...</Text>
@@ -151,7 +151,7 @@ const RequestStatusScreen = ({ navigation }) => {
   // ─── Error ────────────────────────────────────────────────────────────────
   if (error && !refreshing) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView edges={['left','right','bottom']} style={styles.container}>
         <View style={styles.center}>
           <View style={[styles.stateIcon, { backgroundColor: C.redLight }]}>
             <Ionicons name="cloud-offline-outline" size={36} color={C.red} />
@@ -172,16 +172,16 @@ const RequestStatusScreen = ({ navigation }) => {
 
   // ─── Main ─────────────────────────────────────────────────────────────────
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView edges={['left','right','bottom']} style={styles.container}>
       <ScrollView
-        contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 16 }]}
+        contentContainerStyle={[styles.scroll, { paddingTop: 16 + insets.top }]}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[C.red]} tintColor={C.red} />
         }
       >
         {/* Header */}
-        <View style={styles.headerRow}>
+        <View style={[styles.headerRow]}>
           <Text style={styles.headerTitle}>Yêu cầu của bạn</Text>
           {requests.length > 0 && (
             <View style={styles.countBadge}>
@@ -207,11 +207,18 @@ const RequestStatusScreen = ({ navigation }) => {
             </TouchableOpacity>
           </View>
         ) : (
-          requests.map((item) => {
+          requests
+            .filter((item) => {
+              const s = String(item.status || '').toUpperCase();
+              return ['PENDING','VERIFIED','PROCESSING','IN_PROGRESS','ON_THE_WAY','COMPLETED'].includes(s);
+            })
+            .map((item) => {
             const id           = item._id ?? item.id;
-            const si           = getStatus(item.status);
-            const isConfirmed  = item.status === 'COMPLETED' || item.confirmedByUser;
-            const isConfirming = confirmingIds.has(id);
+            const s            = String(item.status || '').toUpperCase();
+            const stage        =
+              s === 'COMPLETED' ? { label: 'Đã xác nhận hoàn thành', color: C.green, bg: C.greenLight, icon: 'checkmark-circle-outline', done: true }
+              : ['PROCESSING','IN_PROGRESS','ON_THE_WAY'].includes(s) ? { label: 'Đang xử lý', color: C.blue, bg: C.blueLight, icon: 'sync-outline', done: false }
+              : { label: 'Đang chờ xác nhận', color: C.amber, bg: C.amberLight, icon: 'time-outline', done: false };
 
             return (
               <TouchableOpacity
@@ -222,9 +229,9 @@ const RequestStatusScreen = ({ navigation }) => {
               >
                 {/* Card header */}
                 <View style={styles.cardHead}>
-                  <View style={[styles.statusBadge, { backgroundColor: si.bg }]}>
-                    <Ionicons name={si.icon} size={13} color={si.color} />
-                    <Text style={[styles.statusText, { color: si.color }]}>{si.label}</Text>
+                  <View style={[styles.statusBadge, { backgroundColor: stage.bg }]}>
+                    <Ionicons name={stage.icon} size={13} color={stage.color} />
+                    <Text style={[styles.statusText, { color: stage.color }]}>{stage.label}</Text>
                   </View>
                   <Text style={styles.reqId}>
                     #{item.requestCode ?? item.userCode ?? id?.slice(-6)?.toUpperCase()}
@@ -257,26 +264,8 @@ const RequestStatusScreen = ({ navigation }) => {
                   </View>
                 </View>
 
-                {/* Confirm button */}
-                {!isConfirmed && (
-                  <TouchableOpacity
-                    style={[styles.confirmBtn, isConfirming && { opacity: 0.65 }]}
-                    onPress={(e) => { e.stopPropagation?.(); handleConfirmRescue(id); }}
-                    disabled={isConfirming}
-                    activeOpacity={0.82}
-                  >
-                    {isConfirming
-                      ? <ActivityIndicator size="small" color={C.white} />
-                      : <Ionicons name="checkbox-outline" size={18} color={C.white} />
-                    }
-                    <Text style={styles.confirmText}>
-                      {isConfirming ? 'Đang xác nhận...' : 'Xác nhận đã được cứu hộ'}
-                    </Text>
-                  </TouchableOpacity>
-                )}
-
                 {/* Confirmed */}
-                {isConfirmed && (
+                {stage.done && (
                   <View style={styles.confirmedRow}>
                     <Ionicons name="checkmark-circle" size={16} color={C.green} />
                     <Text style={styles.confirmedText}>Bạn đã xác nhận hoàn thành</Text>

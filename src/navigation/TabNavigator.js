@@ -8,6 +8,7 @@ import HomeStack from './HomeStack';
 import RequestStatusScreen from '../screens/user/RequestStatusScreen';
 import { NewsAlertsScreen, VolunteerScreen } from './PlaceholderScreens'; // ✅ đổi import
 import RescueRequestDetailScreen from '../screens/user/RescueRequestDetailScreen';
+import DonateScreen from '../screens/user/DonateScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -55,6 +56,16 @@ const TabNavigator = () => {
         options={{
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="home" size={size} color={color} />
+          ),
+          headerShown: false,
+        }}
+      />
+      <Tab.Screen
+        name="Ủng hộ"
+        component={DonateScreen}
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="heart" size={size} color={color} />
           ),
           headerShown: false,
         }}
