@@ -91,7 +91,7 @@ const HomeScreen = ({ navigation }) => {
         {/* ── Header ── */}
         <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
           <View>
-            <Text style={styles.welcomeText}>{'Xin chào 👋'}</Text>
+            <Text style={styles.welcomeText}>{'Xin chào'}</Text>
             <Text style={styles.userName}>{user?.name ?? user?.fullName ?? 'Khách'}</Text>
           </View>
 
@@ -148,7 +148,7 @@ const HomeScreen = ({ navigation }) => {
         <TouchableOpacity
           style={styles.sosCard}
           activeOpacity={0.88}
-          onPress={() => navigation.navigate('EmergencyReport')}
+          onPress={() => handleMenuPress('EmergencyReport')}
         >
           <View style={styles.sosBg} />
           <View style={styles.sosRow}>

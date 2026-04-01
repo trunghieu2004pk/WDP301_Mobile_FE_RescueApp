@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  StatusBar, Dimensions,
+  StatusBar, Dimensions, Modal,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
@@ -33,6 +33,8 @@ const C = {
 const CoordinatorHomeScreen = ({ navigation }) => {
   const insets = useSafeAreaInsets();
   const { user, logout } = useAuth();
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const handleLogoutConfirm = () => { setShowLogoutModal(false); logout(); };
 
   const menuItems = [
     {
@@ -78,7 +80,7 @@ const CoordinatorHomeScreen = ({ navigation }) => {
         {/* ── Header ── */}
         <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
           <View>
-            <Text style={styles.welcomeText}>{'Xin chào 👋'}</Text>
+            <Text style={styles.welcomeText}>{'Xin chào'}</Text>
             <Text style={styles.userName}>
               {user?.fullName || user?.username || 'Điều phối viên'}
             </Text>
@@ -88,11 +90,10 @@ const CoordinatorHomeScreen = ({ navigation }) => {
             {/* Role badge */}
             <View style={styles.roleBadge}>
               <Ionicons name="shield-half" size={13} color={C.blue} />
-              <Text style={styles.roleBadgeText}></Text>
             </View>
 
             {/* Logout */}
-            <TouchableOpacity style={styles.logoutBtn} onPress={logout}>
+            <TouchableOpacity style={styles.logoutBtn} onPress={() => setShowLogoutModal(true)}>
               <Ionicons name="log-out-outline" size={17} color={C.red} />
             </TouchableOpacity>
 
@@ -172,6 +173,19 @@ const CoordinatorHomeScreen = ({ navigation }) => {
 
         <View style={{ height: 32 }} />
       </ScrollView>
+      <AppModal
+        visible={showLogoutModal}
+        onClose={() => setShowLogoutModal(false)}
+        iconName="log-out-outline"
+        iconBg={C.redLight}
+        iconColor={C.red}
+        title="Đăng xuất"
+        message="Bạn có chắc chắn muốn đăng xuất khỏi tài khoản không?"
+        cancelText="Hủy"
+        confirmText="Đăng xuất"
+        confirmColor={C.red}
+        onConfirm={handleLogoutConfirm}
+      />
     </SafeAreaView>
   );
 };
@@ -222,6 +236,41 @@ const styles = StyleSheet.create({
   gridIcon:        { width: 46, height: 46, borderRadius: 13, justifyContent: 'center', alignItems: 'center', marginBottom: 12 },
   gridTitle:       { fontSize: 14, fontWeight: '700', color: C.text, marginBottom: 4 },
   gridDesc:        { fontSize: 11, color: C.sub, lineHeight: 16 },
+  overlay:         { flex: 1, backgroundColor: 'rgba(15,23,42,0.5)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 28 },
+  modalBox:        { width: '100%', backgroundColor: C.white, borderRadius: 24, padding: 24, alignItems: 'center' },
+  modalIconWrap:   { width: 64, height: 64, borderRadius: 20, justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
+  modalTitle:      { fontSize: 18, fontWeight: '800', color: C.text, marginBottom: 8, letterSpacing: -0.3 },
+  modalMessage:    { fontSize: 14, color: C.sub, textAlign: 'center', lineHeight: 22, marginBottom: 22 },
+  modalButtons:    { flexDirection: 'row', gap: 10, width: '100%' },
+  btnSecondary:    { flex: 1, paddingVertical: 14, borderRadius: 14, backgroundColor: C.bg, borderWidth: 1, borderColor: C.border, alignItems: 'center' },
+  btnSecondaryText:{ fontSize: 14, fontWeight: '700', color: C.sub },
+  btnPrimary:      { flex: 1, paddingVertical: 14, borderRadius: 14, alignItems: 'center' },
+  btnPrimaryText:  { fontSize: 14, fontWeight: '700', color: C.white },
 });
 
 export default CoordinatorHomeScreen;
+
+const AppModal = ({
+  visible, onClose, iconName, iconBg, iconColor,
+  title, message, cancelText, confirmText, confirmColor, onConfirm,
+}) => (
+  <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <View style={styles.overlay}>
+      <View style={styles.modalBox}>
+        <View style={[styles.modalIconWrap, { backgroundColor: iconBg }]}>
+          <Ionicons name={iconName} size={32} color={iconColor} />
+        </View>
+        <Text style={styles.modalTitle}>{title}</Text>
+        <Text style={styles.modalMessage}>{message}</Text>
+        <View style={styles.modalButtons}>
+          <TouchableOpacity style={styles.btnSecondary} onPress={onClose}>
+            <Text style={styles.btnSecondaryText}>{cancelText}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.btnPrimary, { backgroundColor: confirmColor }]} onPress={onConfirm}>
+            <Text style={styles.btnPrimaryText}>{confirmText}</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </View>
+  </Modal>
+);

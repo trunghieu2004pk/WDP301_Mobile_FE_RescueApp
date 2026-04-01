@@ -9,9 +9,25 @@ import RequestStatusScreen from '../screens/user/RequestStatusScreen';
 import { NewsAlertsScreen, VolunteerScreen } from './PlaceholderScreens'; // ✅ đổi import
 import RescueRequestDetailScreen from '../screens/user/RescueRequestDetailScreen';
 import DonateScreen from '../screens/user/DonateScreen';
+import DonateHistoryScreen from '../screens/user/DonateHistoryScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
+
+const DonateStack = () => (
+  <Stack.Navigator>
+    <Stack.Screen
+      name="DonateMain"
+      component={DonateScreen}
+      options={{ headerShown: false }}
+    />
+    <Stack.Screen
+      name="DonateHistory"
+      component={DonateHistoryScreen}
+      options={{ headerShown: false }}
+    />
+  </Stack.Navigator>
+);
 
 const StatusStack = () => (
   <Stack.Navigator>
@@ -62,7 +78,7 @@ const TabNavigator = () => {
       />
       <Tab.Screen
         name="Ủng hộ"
-        component={DonateScreen}
+        component={DonateStack}
         options={{
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="heart" size={size} color={color} />

@@ -1,837 +1,464 @@
 import React, { useState, useEffect } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  SafeAreaView,
-  ActivityIndicator,
-  Alert,
-  Modal,
-  FlatList,
-  Image,
-  Dimensions,
-  TextInput,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity,
+  StatusBar, ActivityIndicator, Image, Modal, TextInput, Alert,
+  KeyboardAvoidingView, Platform, TouchableWithoutFeedback, Keyboard,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import * as Location from 'expo-location';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../../context/AuthContext';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL;
-const SCREEN_WIDTH = Dimensions.get('window').width;
 
 const STATUS_MAP = {
-  PENDING:     { label: 'Đang chờ',      color: '#F39C12', icon: 'time-outline' },
-  PROCESSING:  { label: 'Đang xử lý',    color: '#2E91FF', icon: 'sync-outline' },
-  IN_PROGRESS: { label: 'Đang xử lý',    color: '#2E91FF', icon: 'sync-outline' },
-  ON_THE_WAY:  { label: 'Đang đến',      color: '#3498DB', icon: 'boat-outline' },
-  COMPLETED:   { label: 'Đã hoàn thành', color: '#27AE60', icon: 'checkmark-circle-outline' },
-  CANCELLED:   { label: 'Đã hủy',        color: '#A4B0BE', icon: 'close-circle-outline' },
-  VERIFIED:    { label: 'Đã xác minh',   color: '#8E44AD', icon: 'shield-checkmark-outline' },
+  PENDING:    { label: 'Chờ xử lý',     color: '#FF4D4F', icon: 'time-outline' },
+  PROCESSING: { label: 'Đang xử lý',    color: '#E67E22', icon: 'construct-outline' },
+  ON_THE_WAY: { label: 'Đang đến',      color: '#2E91FF', icon: 'boat-outline' },
+  COMPLETED:  { label: 'Đã hoàn thành', color: '#27AE60', icon: 'checkmark-circle-outline' },
+  CANCELLED:  { label: 'Đã hủy',        color: '#A4B0BE', icon: 'close-circle-outline' },
 };
-
-const VERIFIED_STATUSES = ['VERIFIED', 'IN_PROGRESS', 'PROCESSING', 'ON_THE_WAY', 'COMPLETED'];
-
-const EMERGENCY_LEVELS = [
-  { value: 'LOW',    label: 'Thấp',       color: '#27AE60' },
-  { value: 'MEDIUM', label: 'Trung bình', color: '#F39C12' },
-  { value: 'HIGH',   label: 'Cao',        color: '#E74C3C' },
-  { value: 'URGENT', label: 'Khẩn cấp',  color: '#FF4757' },
-];
 
 const getStatusInfo = (status) =>
-  STATUS_MAP[status] || { label: status || '—', color: '#747D8C', icon: 'help-circle-outline' };
+  STATUS_MAP[status] ?? { label: status ?? '—', color: '#747D8C', icon: 'help-circle-outline' };
 
-const getEmergencyInfo = (level) =>
-  EMERGENCY_LEVELS.find(l => l.value === level) || { label: 'Chưa phân loại', color: '#A4B0BE' };
-
-const getAssignedTeamName = (request) => {
-  if (request?.assignedTeamId?.teamName) return request.assignedTeamId.teamName;
-  if (typeof request?.assignedTeamId === 'string') return request.assignedTeamId;
-  if (request?.assignedTeam) return request.assignedTeam;
-  return null;
-};
-
-const extractLatLng = (request) => {
-  const loc = request?.location;
-  if (loc?.coordinates?.length === 2) {
-    return { latitude: loc.coordinates[1], longitude: loc.coordinates[0] };
-  }
+const parseCoordinates = (request) => {
   if (request?.latitude && request?.longitude) {
-    return { latitude: Number(request.latitude), longitude: Number(request.longitude) };
+    return `${Number(request.latitude).toFixed(6)}, ${Number(request.longitude).toFixed(6)}`;
   }
-  return null;
+  if (request?.location?.coordinates?.length === 2) {
+    const [lng, lat] = request.location.coordinates;
+    return `${Number(lat).toFixed(6)}, ${Number(lng).toFixed(6)}`;
+  }
+  if (typeof request?.location === 'string') return request.location;
+  return '—';
 };
 
-const formatAddress = (geo) => {
-  if (!geo) return null;
-  const parts = [geo.streetNumber, geo.street, geo.district, geo.subregion, geo.city].filter(Boolean);
-  return parts.length > 0 ? parts.join(', ') : null;
-};
-
-const getImageUrl = (img) => {
-  if (typeof img === 'string') return img;
-  return img?.url || img?.uri || img?.path || null;
-};
-
-const RequestDetailScreen = ({ route, navigation }) => {
+const RescueRequestDetailScreen = ({ route, navigation }) => {
   const { request: initialRequest } = route.params;
-  const { user, getAuthHeaders } = useAuth();
   const insets = useSafeAreaInsets();
+  const { getAuthHeaders } = useAuth();
 
-  const [request, setRequest] = useState(initialRequest);
-  const [loading, setLoading] = useState(true);
-  const [updating, setUpdating] = useState(false);
+  const [request, setRequest]             = useState(initialRequest);
+  const [loading, setLoading]             = useState(true);
+  const [error, setError]                 = useState(null);
+  const [cancelVisible, setCancelVisible] = useState(false);
+  const [cancelReason, setCancelReason]   = useState('');
+  const [cancelling, setCancelling]       = useState(false);
 
-  const [locationAddress, setLocationAddress] = useState(null);
-  const [locationLoading, setLocationLoading] = useState(false);
+  const id = initialRequest?._id ?? initialRequest?.id;
 
-  const [showAssignModal, setShowAssignModal] = useState(false);
-  const [showConfirmAssignModal, setShowConfirmAssignModal] = useState(false);
-  const [showEmergencyModal, setShowEmergencyModal] = useState(false);
+  useEffect(() => {
+    if (!id) { setError('Không tìm thấy ID yêu cầu.'); setLoading(false); return; }
+    fetchDetail();
+  }, []);
 
-  const [lightboxVisible, setLightboxVisible] = useState(false);
-  const [lightboxIndex, setLightboxIndex] = useState(0);
-
-  const [teams, setTeams] = useState([]);
-  const [teamsLoading, setTeamsLoading] = useState(false);
-  const [selectedTeam, setSelectedTeam] = useState(null);
-
-  const [selectedEmergency, setSelectedEmergency] = useState('');
-  const [vehicles, setVehicles] = useState([]);
-  const [vehiclesLoading, setVehiclesLoading] = useState(false);
-  const [selectedVehicle, setSelectedVehicle] = useState(null);
-  const [inventories, setInventories] = useState([]);
-  const [inventoriesLoading, setInventoriesLoading] = useState(false);
-  const [suppliesDraft, setSuppliesDraft] = useState({});
-
-  // ─── Reverse geocode ──────────────────────────────────────────────────────
-  const reverseGeocode = async (req) => {
-    const coords = extractLatLng(req);
-    if (!coords) return;
-    setLocationLoading(true);
+  const fetchDetail = async () => {
     try {
-      const results = await Location.reverseGeocodeAsync(coords);
-      if (results?.length > 0) {
-        const address = formatAddress(results[0]);
-        if (address) setLocationAddress(address);
-      }
-    } catch (e) {
-      console.log('Reverse geocode error:', e);
-    } finally {
-      setLocationLoading(false);
-    }
-  };
-
-  // ─── Fetch request detail ─────────────────────────────────────────────────
-  const fetchRequestDetail = async () => {
-    try {
-      const id = request._id || request.id;
+      setError(null);
       const response = await fetch(`${API_URL}/rescue-requests/${id}`, {
-        method: 'GET',
-        headers: getAuthHeaders(),
+        method: 'GET', headers: getAuthHeaders(),
       });
-      if (!response.ok) throw new Error(`Lỗi ${response.status}`);
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data?.message || `Lỗi ${response.status}`);
+      }
       const data = await response.json();
-      const fetched = data?.data ?? data;
-      setRequest(fetched);
-      reverseGeocode(fetched);
-    } catch (error) {
-      Alert.alert('Lỗi', 'Không thể tải chi tiết yêu cầu');
+      setRequest(data?.data ?? data);
+    } catch (err) {
+      setError(err.message || 'Không thể tải chi tiết yêu cầu.');
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    if (initialRequest) fetchRequestDetail();
-  }, [initialRequest]);
-
-  // ─── Verify ───────────────────────────────────────────────────────────────
-  const verifyRequest = async () => {
-    setUpdating(true);
-    try {
-      const id = request._id || request.id;
-      const response = await fetch(`${API_URL}/rescue-requests/${id}/verify`, {
-        method: 'PATCH',
-        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ urgencyLevel: request?.urgencyLevel || 'LOW' }),
-      });
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData?.message || `Lỗi ${response.status}`);
-      }
-      const data = await response.json();
-      setRequest(prev => ({ ...prev, status: 'VERIFIED', ...(data?.data ?? data) }));
-      Alert.alert('Thành công', 'Yêu cầu đã được xác minh');
-      // ✅ List sẽ tự refresh qua focus listener khi user quay lại
-    } catch (error) {
-      Alert.alert('Lỗi', error.message || 'Không thể xác minh yêu cầu');
-    } finally {
-      setUpdating(false);
-    }
-  };
-
-  // ─── Fetch teams ──────────────────────────────────────────────────────────
-  const fetchTeams = async () => {
-    setTeamsLoading(true);
-    try {
-      const response = await fetch(`${API_URL}/rescue-teams/available`, {
-        method: 'GET',
-        headers: getAuthHeaders(),
-      });
-      if (!response.ok) throw new Error(`Lỗi ${response.status}`);
-      const data = await response.json();
-      setTeams(data?.data ?? data);
-    } catch (error) {
-      Alert.alert('Lỗi', 'Không thể tải danh sách đội sẵn sàng');
-    } finally {
-      setTeamsLoading(false);
-    }
-  };
-
-  const fetchVehicles = async () => {
-    setVehiclesLoading(true);
-    try {
-      const response = await fetch(`${API_URL}/vehicles/available`, {
-        method: 'GET',
-        headers: getAuthHeaders(),
-      });
-      if (!response.ok) throw new Error(`Lỗi ${response.status}`);
-      const data = await response.json();
-      const list = Array.isArray(data) ? data : data?.data ?? data?.vehicles ?? [];
-      setVehicles(list);
-    } catch (error) {
-      Alert.alert('Lỗi', 'Không thể tải danh sách phương tiện');
-    } finally {
-      setVehiclesLoading(false);
-    }
-  };
-
-  const fetchInventories = async () => {
-    setInventoriesLoading(true);
-    try {
-      const response = await fetch(`${API_URL}/inventories`, {
-        method: 'GET',
-        headers: getAuthHeaders(),
-      });
-      if (!response.ok) throw new Error(`Lỗi ${response.status}`);
-      const data = await response.json();
-      const list = Array.isArray(data) ? data : data?.data ?? data?.items ?? [];
-      setInventories(list);
-    } catch (error) {
-      Alert.alert('Lỗi', 'Không thể tải kho vật tư');
-    } finally {
-      setInventoriesLoading(false);
-    }
-  };
-
-  const openAssignModal = () => {
-    if (user?.role !== 'COORDINATOR') {
-      Alert.alert('Không có quyền', 'Tính năng gán đội chỉ dành cho Điều phối viên.');
+  // ─── Cancel ───────────────────────────────────────────────────────────────
+  const submitCancel = async () => {
+    const reqId = request?._id || request?.id || id;
+    if (!reqId) {
+      Alert.alert('Lỗi', 'Không xác định được ID yêu cầu để hủy.');
       return;
     }
-    setSelectedTeam(null);
-    setShowAssignModal(true);
-    fetchTeams();
-    fetchVehicles();
-    fetchInventories();
-  };
-
-  // ─── Assign team ──────────────────────────────────────────────────────────
-  // ─── Assign team ──────────────────────────────────────────────────────────
-  const assignToTeam = async () => {
-    if (!selectedTeam) return;
-    setUpdating(true);
+    setCancelling(true);
     try {
-      const id = request._id || request.id;
-
-      const supplies = Object.entries(suppliesDraft)
-        .map(([inventoryId, quantity]) => ({ inventoryId, quantity }))
-        .filter((s) => s.quantity > 0);
-      const assignResponse = await fetch(`${API_URL}/rescue-requests/${id}/assign`, {
+      const response = await fetch(`${API_URL}/rescue-requests/${reqId}/cancel`, {
         method: 'PATCH',
         headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          teamId: selectedTeam?._id || selectedTeam?.id || selectedTeam,
-          vehicleId: selectedVehicle?._id || selectedVehicle?.id || selectedVehicle || null,
-          supplies,
-        }),
+        body: JSON.stringify({ cancelReason: cancelReason?.trim() || '' }),
       });
-      if (!assignResponse.ok) {
-        const data = await assignResponse.json().catch(() => ({}));
-        throw new Error(data?.message || `Lỗi ${assignResponse.status}`);
-      }
-      const assignData = await assignResponse.json();
-
-      const statusResponse = await fetch(`${API_URL}/rescue-requests/${id}/status`, {
-        method: 'PATCH',
-        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'IN_PROGRESS' }),
-      });
-      if (!statusResponse.ok) {
-        const data = await statusResponse.json().catch(() => ({}));
-        // Không throw — gán đội đã thành công, chỉ log lỗi cập nhật status
-        console.warn('Cập nhật trạng thái thất bại:', data?.message);
-      }
-      const statusData = statusResponse.ok ? await statusResponse.json() : {};
-
-      setRequest(prev => ({
-        ...prev,
-        assignedTeamId: { _id: selectedTeam._id, teamName: selectedTeam.teamName },
-        status: 'IN_PROGRESS',
-        ...(assignData?.data ?? assignData),
-        ...(statusData?.data ?? statusData),
-      }));
-
-      setShowConfirmAssignModal(false);
-      setShowAssignModal(false);
-      setSelectedTeam(null);
-      setSelectedVehicle(null);
-      setSuppliesDraft({});
-      Alert.alert('Thành công', `Đã gán yêu cầu cho ${selectedTeam.teamName} và chuyển sang đang xử lý`);
-    } catch (error) {
-      Alert.alert('Lỗi', error.message || 'Không thể gán yêu cầu');
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.message || `Lỗi ${response.status}`);
+      setRequest(prev => ({ ...(prev || {}), status: 'CANCELLED', ...(data?.data ?? data) }));
+      setCancelVisible(false);
+      setCancelReason('');
+      Alert.alert('Đã hủy', 'Yêu cầu đã được hủy thành công.');
+    } catch (e) {
+      Alert.alert('Lỗi', e.message || 'Không thể hủy yêu cầu.');
     } finally {
-      setUpdating(false);
+      setCancelling(false);
     }
   };
-
-  // ─── Emergency level ──────────────────────────────────────────────────────
-  const setEmergencyLevel = async (level) => {
-    setUpdating(true);
-    try {
-      const id = request._id || request.id;
-      const response = await fetch(`${API_URL}/rescue-requests/${id}/verify`, {
-        method: 'PATCH',
-        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ urgencyLevel: level }),
-      });
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData?.message || `Lỗi ${response.status}`);
-      }
-      const data = await response.json();
-      setRequest(prev => ({ ...prev, urgencyLevel: level, status: 'VERIFIED', ...(data?.data ?? data) }));
-      setShowEmergencyModal(false);
-      setSelectedEmergency('');
-      Alert.alert('Thành công', 'Đã cập nhật mức độ khẩn cấp');
-      // ✅ List sẽ tự refresh qua focus listener khi user quay lại
-    } catch (error) {
-      Alert.alert('Lỗi', error.message || 'Không thể cập nhật mức độ khẩn cấp');
-    } finally {
-      setUpdating(false);
-    }
-  };
-
-  // ─── Helpers ──────────────────────────────────────────────────────────────
-  const formatDateTime = (dateString) => {
-    if (!dateString) return '—';
-    try { return new Date(dateString).toLocaleString('vi-VN'); }
-    catch { return dateString; }
-  };
-
-  const getLocationDisplay = () => {
-    if (locationAddress) return locationAddress;
-    const coords = extractLatLng(request);
-    if (coords) return `${coords.latitude.toFixed(4)}, ${coords.longitude.toFixed(4)}`;
-    return '—';
-  };
-
-  const openLightbox = (index) => {
-    setLightboxIndex(index);
-    setLightboxVisible(true);
-  };
-
-  if (loading) {
-    return (
-      <SafeAreaView style={[styles.container, { paddingTop: insets.top }]}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#2E91FF" />
-          <Text style={styles.loadingText}>Đang tải chi tiết yêu cầu...</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
 
   const statusInfo = getStatusInfo(request?.status);
-  const emergencyInfo = getEmergencyInfo(request?.urgencyLevel);
-  const assignedTeamName = getAssignedTeamName(request);
-  const isVerified = VERIFIED_STATUSES.includes(request?.status);
-  const isAssigned = !!assignedTeamName;
-  const images = (request?.images || []).map(getImageUrl).filter(Boolean);
+  const canCancel  = !['CANCELLED', 'COMPLETED'].includes(request?.status);
 
+  const timelineSteps = [
+    { key: 'submitted',  label: 'Đã gửi yêu cầu',       icon: 'document-text-outline',   done: true },
+    { key: 'processing', label: 'Đang xử lý',            icon: 'construct-outline',        done: ['PROCESSING', 'ON_THE_WAY', 'COMPLETED'].includes(request?.status) },
+    { key: 'ontheway',   label: 'Đội cứu hộ đang đến',   icon: 'boat-outline',             done: ['ON_THE_WAY', 'COMPLETED'].includes(request?.status) },
+    { key: 'done',       label: 'Hoàn thành',             icon: 'checkmark-circle-outline', done: request?.status === 'COMPLETED' },
+  ];
+
+  const infoItems = [
+    { icon: 'calendar-outline', label: 'Thời gian gửi', value: request?.createdAt ? new Date(request.createdAt).toLocaleString('vi-VN') : '—' },
+    { icon: 'location-outline', label: 'Tọa độ',        value: parseCoordinates(request) },
+    { icon: 'person-outline',   label: 'Họ tên',        value: request?.userId?.fullName ?? '—' },
+    { icon: 'call-outline',     label: 'Số điện thoại', value: request?.userId?.phone ?? '—' },
+    { icon: 'barcode-outline',  label: 'Mã yêu cầu',   value: request?.requestCode ?? id?.slice(-8)?.toUpperCase() ?? '—' },
+  ];
+
+  // ─── Render ───────────────────────────────────────────────────────────────
   return (
-    <SafeAreaView style={[styles.container, { paddingTop: insets.top }]}>
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={24} color="#2F3542" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Chi tiết yêu cầu</Text>
-        <View style={styles.headerRight} />
-      </View>
+    <>
+      <SafeAreaView style={styles.container} edges={['left', 'right']}>
+        <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
 
-      <ScrollView style={styles.scrollView}>
-        {/* Status Banner */}
-        <View style={[styles.banner, { borderLeftColor: statusInfo.color }]}>
-          <View style={styles.bannerHeader}>
-            <Text style={styles.requestId}>
-              #{request?.requestCode || request?._id?.slice(-8)?.toUpperCase()}
+        {/* Header */}
+        <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
+          <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+            <Ionicons name="chevron-back" size={22} color="#2F3542" />
+          </TouchableOpacity>
+          <View style={styles.headerCenter}>
+            <Text style={styles.headerTitle}>Chi tiết yêu cầu</Text>
+            <Text style={styles.headerSub}>
+              #{request?.requestCode ?? id?.slice(-8)?.toUpperCase() ?? '—'}
             </Text>
-            <View style={[styles.statusBadge, { backgroundColor: statusInfo.color + '20' }]}>
-              <Ionicons name={statusInfo.icon} size={14} color={statusInfo.color} />
-              <Text style={[styles.statusText, { color: statusInfo.color }]}>{statusInfo.label}</Text>
-            </View>
           </View>
-          <Text style={styles.bannerTime}>{formatDateTime(request?.createdAt || request?.date)}</Text>
-        </View>
-
-        {/* Emergency Level */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Mức độ khẩn cấp</Text>
           <TouchableOpacity
-            style={[styles.emergencyBadge, { backgroundColor: emergencyInfo.color + '20' }]}
-            onPress={() => { setSelectedEmergency(request?.urgencyLevel || ''); setShowEmergencyModal(true); }}
+            style={styles.refreshBtn}
+            onPress={() => { setLoading(true); fetchDetail(); }}
+            disabled={loading}
           >
-            <Text style={[styles.emergencyText, { color: emergencyInfo.color }]}>{emergencyInfo.label}</Text>
-            <Ionicons name="pencil" size={14} color={emergencyInfo.color} />
+            {loading
+              ? <ActivityIndicator size="small" color="#2E91FF" />
+              : <Ionicons name="refresh-outline" size={20} color="#747D8C" />
+            }
           </TouchableOpacity>
         </View>
 
-        {/* Request Info */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Thông tin yêu cầu</Text>
-          <View style={styles.infoCard}>
-            <View style={styles.infoRow}>
-              <Ionicons name="document-text-outline" size={18} color="#2E91FF" />
-              <Text style={styles.infoLabel}>Mô tả:</Text>
-              <Text style={styles.infoValue}>{request?.description || '—'}</Text>
-            </View>
-            <View style={styles.infoRow}>
-              <Ionicons name="location-outline" size={18} color="#2E91FF" />
-              <Text style={styles.infoLabel}>Vị trí:</Text>
-              {locationLoading ? (
-                <View style={styles.locationLoading}>
-                  <ActivityIndicator size="small" color="#2E91FF" />
-                  <Text style={styles.locationLoadingText}>Đang xác định địa chỉ...</Text>
-                </View>
-              ) : (
-                <Text style={styles.infoValue} numberOfLines={2}>{getLocationDisplay()}</Text>
-              )}
-            </View>
+        {/* Error banner */}
+        {error && !loading && (
+          <TouchableOpacity style={styles.errorBanner} onPress={() => { setLoading(true); fetchDetail(); }}>
+            <Ionicons name="alert-circle-outline" size={16} color="#FF4757" />
+            <Text style={styles.errorText}>{error} — Nhấn để thử lại</Text>
+          </TouchableOpacity>
+        )}
 
-            {images.length > 0 && (
-              <View style={styles.imagesSection}>
-                <View style={styles.imagesSectionHeader}>
-                  <Ionicons name="images-outline" size={18} color="#2E91FF" />
-                  <Text style={styles.infoLabel}>Hình ảnh:</Text>
-                  <Text style={styles.imagesCount}>{images.length} ảnh</Text>
-                </View>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.thumbnailRow}>
-                  {images.map((url, index) => (
-                    <TouchableOpacity
-                      key={index}
-                      style={styles.thumbnailWrap}
-                      onPress={() => openLightbox(index)}
-                      activeOpacity={0.85}
-                    >
-                      <Image source={{ uri: url }} style={styles.thumbnail} resizeMode="cover" />
-                      <View style={styles.thumbnailOverlay}>
-                        <Ionicons name="expand-outline" size={16} color="#FFFFFF" />
-                      </View>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
+        {/* Scroll — chứa toàn bộ nội dung + nút hủy ở cuối scroll */}
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 24 }]}
+        >
+          {/* Banner */}
+          <View style={[styles.bannerCard, { borderLeftColor: statusInfo.color }]}>
+            <View style={styles.bannerTop}>
+              <Text style={styles.requestIdText}>
+                #{request?.requestCode ?? id?.slice(-8)?.toUpperCase() ?? '—'}
+              </Text>
+              <View style={[styles.statusBadge, { backgroundColor: statusInfo.color + '20' }]}>
+                <Ionicons name={statusInfo.icon} size={14} color={statusInfo.color} />
+                <Text style={[styles.statusText, { color: statusInfo.color }]}>{statusInfo.label}</Text>
               </View>
-            )}
-          </View>
-        </View>
-
-        {/* Assignment Info */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Phân công</Text>
-          <View style={styles.infoCard}>
-            <View style={styles.infoRow}>
-              <Ionicons name="people-outline" size={18} color="#2E91FF" />
-              <Text style={styles.infoLabel}>Đội cứu hộ:</Text>
-              <Text style={[styles.infoValue, isAssigned && { color: '#2E91FF', fontWeight: '600' }]}>
-                {assignedTeamName || 'Chưa phân công'}
-              </Text>
             </View>
-            <View style={[styles.infoRow, { marginBottom: 0 }]}>
-              <Ionicons name="checkmark-circle-outline" size={18} color="#2E91FF" />
-              <Text style={styles.infoLabel}>Xác minh:</Text>
-              <Text style={[styles.infoValue, isVerified && { color: '#27AE60', fontWeight: '600' }]}>
-                {isVerified ? 'Đã xác minh' : 'Chưa xác minh'}
-              </Text>
-            </View>
+            <Text style={styles.bannerDate}>
+              {request?.createdAt ? new Date(request.createdAt).toLocaleString('vi-VN') : '—'}
+            </Text>
           </View>
-        </View>
 
-        {/* Action Buttons */}
-        <View style={styles.actionsSection}>
-          {!isVerified && (
-            <TouchableOpacity
-              style={[styles.actionButton, styles.verifyButton]}
-              onPress={verifyRequest}
-              disabled={updating}
-            >
-              <Ionicons name="checkmark-circle" size={20} color="#FFFFFF" />
-              <Text style={styles.actionButtonText}>Xác minh yêu cầu</Text>
-            </TouchableOpacity>
-          )}
-          {user?.role === 'COORDINATOR' && (
-            <TouchableOpacity
-              style={[styles.actionButton, isAssigned ? styles.assignedButton : styles.assignButton]}
-              onPress={openAssignModal}
-              disabled={updating}
-            >
-              <Ionicons name={isAssigned ? 'people' : 'person-add'} size={20} color="#FFFFFF" />
-              <Text style={styles.actionButtonText}>
-                {isAssigned ? 'Đổi đội cứu hộ' : 'Gán đội cứu hộ'}
-              </Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      </ScrollView>
-
-      {/* Lightbox */}
-      <Modal visible={lightboxVisible} transparent animationType="fade" statusBarTranslucent>
-        <View style={styles.lightboxOverlay}>
-          <View style={styles.lightboxHeader}>
-            <Text style={styles.lightboxCounter}>{lightboxIndex + 1} / {images.length}</Text>
-            <TouchableOpacity onPress={() => setLightboxVisible(false)} style={styles.lightboxClose}>
-              <Ionicons name="close" size={28} color="#FFFFFF" />
-            </TouchableOpacity>
-          </View>
-          <FlatList
-            data={images}
-            horizontal
-            pagingEnabled
-            showsHorizontalScrollIndicator={false}
-            initialScrollIndex={lightboxIndex}
-            getItemLayout={(_, index) => ({ length: SCREEN_WIDTH, offset: SCREEN_WIDTH * index, index })}
-            onMomentumScrollEnd={(e) => {
-              const index = Math.round(e.nativeEvent.contentOffset.x / SCREEN_WIDTH);
-              setLightboxIndex(index);
-            }}
-            keyExtractor={(_, i) => String(i)}
-            renderItem={({ item }) => (
-              <View style={styles.lightboxImageWrap}>
-                <Image source={{ uri: item }} style={styles.lightboxImage} resizeMode="contain" />
-              </View>
-            )}
-          />
-          {images.length > 1 && (
-            <View style={styles.lightboxDots}>
-              {images.map((_, i) => (
-                <View key={i} style={[styles.dot, i === lightboxIndex && styles.dotActive]} />
+          {/* Timeline */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Tiến trình xử lý</Text>
+            <View style={styles.timeline}>
+              {timelineSteps.map((step, index) => (
+                <View key={step.key} style={styles.timelineRow}>
+                  <View style={styles.timelineLeft}>
+                    <View style={[styles.timelineDot, step.done ? styles.timelineDotDone : styles.timelineDotPending]}>
+                      <Ionicons name={step.icon} size={16} color={step.done ? '#FFFFFF' : '#A4B0BE'} />
+                    </View>
+                    {index < timelineSteps.length - 1 && (
+                      <View style={[
+                        styles.timelineLine,
+                        step.done && timelineSteps[index + 1].done
+                          ? styles.timelineLineDone : styles.timelineLinePending,
+                      ]} />
+                    )}
+                  </View>
+                  <Text style={[styles.timelineLabel, step.done ? styles.timelineLabelDone : styles.timelineLabelPending]}>
+                    {step.label}
+                  </Text>
+                </View>
               ))}
             </View>
+          </View>
+
+          {/* Info */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Thông tin yêu cầu</Text>
+            <View style={styles.infoCard}>
+              {infoItems.map((item, index) => (
+                <View key={item.label}>
+                  <View style={styles.infoRow}>
+                    <View style={styles.infoIconWrap}>
+                      <Ionicons name={item.icon} size={18} color="#2E91FF" />
+                    </View>
+                    <View style={styles.infoTextWrap}>
+                      <Text style={styles.infoLabel}>{item.label}</Text>
+                      <Text style={styles.infoValue}>{item.value}</Text>
+                    </View>
+                  </View>
+                  {index < infoItems.length - 1 && <View style={styles.divider} />}
+                </View>
+              ))}
+            </View>
+          </View>
+
+          {/* Description */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Mô tả chi tiết</Text>
+            <View style={styles.descriptionCard}>
+              <MaterialCommunityIcons name="text-box-outline" size={20} color="#747D8C" style={{ marginBottom: 8 }} />
+              <Text style={styles.descriptionText}>{request?.description ?? '—'}</Text>
+            </View>
+          </View>
+
+          {/* Images */}
+          {request?.images?.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Hình ảnh hiện trường</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                {request.images.map((url, index) => (
+                  <Image key={index} source={{ uri: url }} style={styles.rescueImage} resizeMode="cover" />
+                ))}
+              </ScrollView>
+            </View>
           )}
-        </View>
-      </Modal>
 
-      {/* Modal: Danh sách đội cứu hộ */}
-      <Modal visible={showAssignModal} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { maxHeight: '75%' }]}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Chọn đội cứu hộ</Text>
-              <TouchableOpacity onPress={() => setShowAssignModal(false)}>
-                <Ionicons name="close" size={24} color="#2F3542" />
-              </TouchableOpacity>
+          {/* Completed banner */}
+          {request?.status === 'COMPLETED' && (
+            <View style={styles.confirmedBanner}>
+              <Ionicons name="checkmark-circle" size={22} color="#27AE60" />
+              <Text style={styles.confirmedText}>Yêu cầu đã được hoàn thành</Text>
             </View>
-            {teamsLoading ? (
-              <View style={styles.teamsLoading}>
-                <ActivityIndicator size="large" color="#2E91FF" />
-                <Text style={styles.teamsLoadingText}>Đang tải danh sách...</Text>
-              </View>
-            ) : teams.length === 0 ? (
-              <View style={styles.teamsLoading}>
-                <Ionicons name="alert-circle-outline" size={40} color="#A4B0BE" />
-                <Text style={styles.teamsLoadingText}>Không có đội cứu hộ nào</Text>
-              </View>
-            ) : (
-              <FlatList
-                data={teams}
-                keyExtractor={(item) => item._id}
-                style={{ marginTop: 8 }}
-                renderItem={({ item }) => {
-                  const isCurrent = item._id === request?.assignedTeamId?._id;
-                  return (
+          )}
+
+          {/* Cancelled banner */}
+          {request?.status === 'CANCELLED' && (
+            <View style={styles.cancelledBanner}>
+              <Ionicons name="close-circle" size={22} color="#A4B0BE" />
+              <Text style={styles.cancelledText}>Yêu cầu đã bị hủy</Text>
+            </View>
+          )}
+
+          {/* Nút hủy — nằm TRONG ScrollView, cuối cùng */}
+          {canCancel && (
+            <TouchableOpacity
+              style={styles.cancelBtn}
+              onPress={() => setCancelVisible(true)}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="close-circle-outline" size={20} color="#FFFFFF" />
+              <Text style={styles.cancelBtnText}>Hủy yêu cầu</Text>
+            </TouchableOpacity>
+          )}
+        </ScrollView>
+      </SafeAreaView>
+
+      {/* Modal hủy */}
+      <Modal
+        visible={cancelVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => { setCancelVisible(false); Keyboard.dismiss(); }}
+      >
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
+        >
+          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+            <View style={styles.modalOverlay}>
+              <TouchableWithoutFeedback>
+                <View style={styles.modalContent}>
+                  <View style={styles.modalIconWrap}>
+                    <Ionicons name="alert-circle-outline" size={48} color="#C0392B" />
+                  </View>
+                  <Text style={styles.modalTitle}>Hủy yêu cầu cứu hộ</Text>
+                  <Text style={styles.modalDesc}>Vui lòng nhập lý do hủy yêu cầu này.</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Nhập lý do hủy (bắt buộc)"
+                    placeholderTextColor="#A4B0BE"
+                    value={cancelReason}
+                    onChangeText={setCancelReason}
+                    multiline
+                    textAlignVertical="top"
+                    returnKeyType="done"
+                    blurOnSubmit
+                  />
+                  <View style={styles.modalButtons}>
                     <TouchableOpacity
-                      style={[styles.teamItem, isCurrent && styles.teamItemActive]}
-                      onPress={() => { setSelectedTeam(item); setShowAssignModal(false); setShowConfirmAssignModal(true); }}
+                      style={[styles.modalBtn, styles.modalBtnClose]}
+                      onPress={() => { setCancelVisible(false); setCancelReason(''); Keyboard.dismiss(); }}
                     >
-                      <View style={styles.teamItemLeft}>
-                        <View style={[styles.teamAvatar, isCurrent && styles.teamAvatarActive]}>
-                          <Ionicons name="people" size={20} color={isCurrent ? '#FFFFFF' : '#2E91FF'} />
-                        </View>
-                        <View>
-                          <Text style={[styles.teamName, isCurrent && { color: '#2E91FF' }]}>
-                            {item.teamName}{isCurrent ? '  ✓' : ''}
-                          </Text>
-                          <Text style={styles.teamSub}>
-                            {item.members?.length ?? 0} thành viên{isCurrent ? ' · Đang phân công' : ''}
-                          </Text>
-                        </View>
-                      </View>
-                      <Ionicons name="chevron-forward" size={18} color="#A4B0BE" />
+                      <Text style={styles.modalBtnText}>Đóng</Text>
                     </TouchableOpacity>
-                  );
-                }}
-                ItemSeparatorComponent={() => <View style={styles.separator} />}
-              />
-            )}
-          </View>
-        </View>
-      </Modal>
-
-      {/* Modal: Confirm gán đội */}
-      <Modal visible={showConfirmAssignModal} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.confirmIconWrap}>
-              <Ionicons name="people-circle-outline" size={56} color="#2E91FF" />
+                    <TouchableOpacity
+                      style={[
+                        styles.modalBtn, styles.modalBtnConfirm,
+                        (!cancelReason?.trim() || cancelling) && styles.modalBtnDisabled,
+                      ]}
+                      onPress={submitCancel}
+                      disabled={cancelling || !cancelReason?.trim()}
+                    >
+                      {cancelling
+                        ? <ActivityIndicator size="small" color="#FFFFFF" />
+                        : <Text style={styles.modalBtnText}>Xác nhận hủy</Text>
+                      }
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </TouchableWithoutFeedback>
             </View>
-            <Text style={styles.modalTitle}>Xác nhận phân công</Text>
-            <ScrollView style={{ maxHeight: 360 }} contentContainerStyle={{ paddingBottom: 12 }}>
-              <Text style={styles.confirmDesc}>
-                Gán yêu cầu{' '}
-                <Text style={{ fontWeight: 'bold', color: '#2F3542' }}>
-                  #{request?.requestCode || request?._id?.slice(-8)?.toUpperCase()}
-                </Text>
-                {' '}cho đội{' '}
-                <Text style={{ fontWeight: 'bold', color: '#2E91FF' }}>{selectedTeam?.teamName}</Text>?
-              </Text>
-              <View style={{ marginTop: 16 }}>
-                <Text style={styles.sectionTitle}>Chọn phương tiện</Text>
-                {vehiclesLoading ? (
-                  <ActivityIndicator size="small" color="#2E91FF" />
-                ) : (
-                  <FlatList
-                    data={vehicles}
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    keyExtractor={(item, idx) => item?._id || item?.id || String(idx)}
-                    renderItem={({ item }) => {
-                      const label = item?.name || item?.plateNumber || item?.plate || item?.type || 'Phương tiện';
-                      const isSel = (selectedVehicle?._id || selectedVehicle?.id) === (item?._id || item?.id);
-                      return (
-                        <TouchableOpacity
-                          style={[styles.vehicleChip, isSel && styles.vehicleChipActive]}
-                          onPress={() => setSelectedVehicle(item)}
-                        >
-                          <Text style={[styles.vehicleChipText, isSel && { color: '#FFFFFF' }]}>{label}</Text>
-                        </TouchableOpacity>
-                      );
-                    }}
-                    ItemSeparatorComponent={() => <View style={{ width: 8 }} />}
-                  />
-                )}
-              </View>
-              <View style={{ marginTop: 16 }}>
-                <Text style={styles.sectionTitle}>Vật tư kèm theo</Text>
-                {inventoriesLoading ? (
-                  <ActivityIndicator size="small" color="#2E91FF" />
-                ) : (
-                  <FlatList
-                    data={inventories}
-                    keyExtractor={(item, idx) => item?._id || item?.id || String(idx)}
-                  renderItem={({ item }) => {
-                    const label = item?.itemName || item?.name || item?.title || 'Vật tư';
-                      const id = item?._id || item?.id;
-                      const qty = suppliesDraft[id] || 0;
-                      return (
-                        <View style={styles.supplyRow}>
-                          <Text style={styles.supplyLabel}>{label}</Text>
-                          <View style={styles.supplyControls}>
-                            <TouchableOpacity
-                              style={styles.qtyBtn}
-                              onPress={() => setSuppliesDraft(prev => ({ ...prev, [id]: Math.max(0, (prev[id] || 0) - 1) }))}
-                            >
-                              <Ionicons name="remove" size={16} color="#2E91FF" />
-                            </TouchableOpacity>
-                            <Text style={styles.qtyText}>{qty}</Text>
-                            <TouchableOpacity
-                              style={styles.qtyBtn}
-                              onPress={() => setSuppliesDraft(prev => ({ ...prev, [id]: (prev[id] || 0) + 1 }))}
-                            >
-                              <Ionicons name="add" size={16} color="#2E91FF" />
-                            </TouchableOpacity>
-                          </View>
-                        </View>
-                      );
-                    }}
-                    ItemSeparatorComponent={() => <View style={styles.separator} />}
-                  />
-                )}
-              </View>
-            </ScrollView>
-            <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.cancelButton]}
-                onPress={() => setShowConfirmAssignModal(false)}
-              >
-                <Text style={styles.modalButtonText}>Hủy</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.confirmButton]}
-                onPress={assignToTeam}
-                disabled={updating}
-              >
-                {updating
-                  ? <ActivityIndicator size="small" color="#fff" />
-                  : <Text style={styles.modalButtonText}>Xác nhận</Text>
-                }
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
+          </TouchableWithoutFeedback>
+        </KeyboardAvoidingView>
       </Modal>
-
-      {/* Modal: Phân loại khẩn cấp */}
-      <Modal visible={showEmergencyModal} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Phân loại khẩn cấp</Text>
-            {EMERGENCY_LEVELS.map((level) => (
-              <TouchableOpacity
-                key={level.value}
-                style={[
-                  styles.emergencyOption,
-                  { backgroundColor: level.color + '20' },
-                  selectedEmergency === level.value && { backgroundColor: level.color + '40' },
-                ]}
-                onPress={() => setSelectedEmergency(level.value)}
-              >
-                <Text style={[styles.emergencyOptionText, { color: level.color }]}>{level.label}</Text>
-              </TouchableOpacity>
-            ))}
-            <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.cancelButton]}
-                onPress={() => { setShowEmergencyModal(false); setSelectedEmergency(''); }}
-              >
-                <Text style={styles.modalButtonText}>Hủy</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.confirmButton]}
-                onPress={() => setEmergencyLevel(selectedEmergency)}
-                disabled={!selectedEmergency || updating}
-              >
-                <Text style={styles.modalButtonText}>Xác nhận</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      {updating && (
-        <View style={styles.loadingOverlay}>
-          <ActivityIndicator size="large" color="#FFFFFF" />
-        </View>
-      )}
-    </SafeAreaView>
+    </>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFFFFF' },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  loadingText: { marginTop: 16, fontSize: 16, color: '#747D8C' },
+  container: { flex: 1, backgroundColor: '#F8F9FA' },
+
+  // Header
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 20, paddingVertical: 16,
-    borderBottomWidth: 1, borderBottomColor: '#F1F2F6',
+    paddingHorizontal: 16, paddingBottom: 14,
+    backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#F1F2F6',
   },
-  backButton: { padding: 8 },
-  headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#2F3542' },
-  headerRight: { width: 40 },
-  scrollView: { flex: 1, padding: 16 },
-  banner: {
-    backgroundColor: '#FFFFFF', padding: 16, borderRadius: 12,
-    borderLeftWidth: 4, marginBottom: 20, borderWidth: 1, borderColor: '#F1F2F6',
+  backBtn:      { width: 40, height: 40, borderRadius: 12, backgroundColor: '#F1F2F6', justifyContent: 'center', alignItems: 'center' },
+  refreshBtn:   { width: 40, height: 40, borderRadius: 12, backgroundColor: '#F1F2F6', justifyContent: 'center', alignItems: 'center' },
+  headerCenter: { flex: 1, alignItems: 'center' },
+  headerTitle:  { fontSize: 16, fontWeight: '700', color: '#2F3542' },
+  headerSub:    { fontSize: 12, color: '#A4B0BE', fontWeight: '500', marginTop: 2 },
+
+  // Error
+  errorBanner: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 16, paddingVertical: 10,
+    backgroundColor: '#FFF0F1', gap: 8,
   },
-  bannerHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
-  requestId: { fontSize: 16, fontWeight: 'bold', color: '#2F3542' },
-  statusBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 },
-  statusText: { fontSize: 12, fontWeight: '600' },
-  bannerTime: { fontSize: 12, color: '#747D8C' },
-  section: { marginBottom: 20 },
-  sectionTitle: { fontSize: 16, fontWeight: '600', color: '#2F3542', marginBottom: 12 },
-  emergencyBadge: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, alignSelf: 'flex-start' },
-  emergencyText: { fontSize: 14, fontWeight: '600' },
-  infoCard: { backgroundColor: '#F8F9FA', borderRadius: 12, padding: 16, borderWidth: 1, borderColor: '#F1F2F6' },
-  infoRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginBottom: 12 },
-  infoLabel: { fontSize: 14, fontWeight: '600', color: '#2F3542', minWidth: 60 },
-  infoValue: { fontSize: 14, color: '#747D8C', flex: 1 },
-  locationLoading: { flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 },
-  locationLoadingText: { fontSize: 13, color: '#A4B0BE', fontStyle: 'italic' },
-  imagesSection: { marginTop: 4 },
-  imagesSectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
-  imagesCount: { fontSize: 13, color: '#747D8C' },
-  thumbnailRow: { flexDirection: 'row' },
-  thumbnailWrap: { marginRight: 10, borderRadius: 10, overflow: 'hidden', position: 'relative' },
-  thumbnail: { width: 90, height: 90, borderRadius: 10, backgroundColor: '#E9ECEF' },
-  thumbnailOverlay: {
-    position: 'absolute', bottom: 6, right: 6,
-    backgroundColor: 'rgba(0,0,0,0.45)', borderRadius: 4, padding: 3,
+  errorText: { fontSize: 13, color: '#FF4757', flex: 1 },
+
+  // Scroll
+  scrollContent: { padding: 20 },
+
+  // Banner card
+  bannerCard: {
+    backgroundColor: '#FFFFFF', borderRadius: 16, padding: 18,
+    marginBottom: 20, borderLeftWidth: 5,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06, shadowRadius: 8, elevation: 3,
   },
-  lightboxOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', justifyContent: 'center' },
-  lightboxHeader: {
-    position: 'absolute', top: 50, left: 0, right: 0, zIndex: 10,
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: 20,
+  bannerTop:     { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  requestIdText: { fontSize: 18, fontWeight: 'bold', color: '#2F3542' },
+  statusBadge:   { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, gap: 5 },
+  statusText:    { fontSize: 13, fontWeight: 'bold' },
+  bannerDate:    { fontSize: 13, color: '#747D8C', fontWeight: '500' },
+
+  // Section
+  section:      { marginBottom: 20 },
+  sectionTitle: { fontSize: 16, fontWeight: 'bold', color: '#2F3542', marginBottom: 12 },
+
+  // Timeline
+  timeline: {
+    backgroundColor: '#FFFFFF', borderRadius: 16, padding: 20,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06, shadowRadius: 8, elevation: 3,
   },
-  lightboxCounter: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
-  lightboxClose: { padding: 8 },
-  lightboxImageWrap: { width: SCREEN_WIDTH, justifyContent: 'center', alignItems: 'center' },
-  lightboxImage: { width: SCREEN_WIDTH, height: SCREEN_WIDTH * 1.2 },
-  lightboxDots: { position: 'absolute', bottom: 60, left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', gap: 6 },
-  dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.4)' },
-  dotActive: { backgroundColor: '#FFFFFF', width: 18 },
-  actionsSection: { gap: 12, marginBottom: 30 },
-  actionButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 16, borderRadius: 12 },
-  verifyButton: { backgroundColor: '#27AE60' },
-  assignButton: { backgroundColor: '#2E91FF' },
-  assignedButton: { backgroundColor: '#7F8C8D' },
-  actionButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  modalContent: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 24, width: '100%', maxWidth: 400 },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
-  modalTitle: { fontSize: 18, fontWeight: 'bold', color: '#2F3542', marginBottom: 4, textAlign: 'center' },
-  modalButtons: { flexDirection: 'row', gap: 12, marginTop: 20 },
-  modalButton: { flex: 1, padding: 16, borderRadius: 8, alignItems: 'center' },
-  cancelButton: { backgroundColor: '#C0392B' },
-  confirmButton: { backgroundColor: '#2E91FF' },
-  modalButtonText: { fontSize: 16, fontWeight: '600', color: '#FFFFFF' },
-  teamsLoading: { alignItems: 'center', paddingVertical: 40, gap: 12 },
-  teamsLoadingText: { fontSize: 14, color: '#747D8C' },
-  teamItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 14, paddingHorizontal: 4, borderRadius: 8 },
-  teamItemActive: { backgroundColor: '#EBF4FF', paddingHorizontal: 8 },
-  teamItemLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  teamAvatar: { width: 42, height: 42, borderRadius: 21, backgroundColor: '#EBF4FF', justifyContent: 'center', alignItems: 'center' },
-  teamAvatarActive: { backgroundColor: '#2E91FF' },
-  teamName: { fontSize: 15, fontWeight: '600', color: '#2F3542' },
-  teamSub: { fontSize: 12, color: '#747D8C', marginTop: 2 },
-  separator: { height: 1, backgroundColor: '#F1F2F6' },
-  confirmIconWrap: { alignItems: 'center', marginBottom: 8 },
-  confirmDesc: { fontSize: 15, color: '#747D8C', textAlign: 'center', lineHeight: 22, marginTop: 4 },
-  emergencyOption: { padding: 16, borderRadius: 8, marginBottom: 8, alignItems: 'center' },
-  emergencyOptionText: { fontSize: 16, fontWeight: '600' },
-  loadingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center' },
-  vehicleChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16, borderWidth: 1, borderColor: '#2E91FF' },
-  vehicleChipActive: { backgroundColor: '#2E91FF' },
-  vehicleChipText: { color: '#2E91FF', fontSize: 13, fontWeight: '600' },
-  supplyRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8 },
-  supplyLabel: { fontSize: 14, color: '#2F3542', flex: 1, marginRight: 10 },
-  supplyControls: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  qtyBtn: { paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: '#2E91FF', borderRadius: 8 },
-  qtyText: { minWidth: 20, textAlign: 'center', fontSize: 14, color: '#2F3542' },
+  timelineRow:          { flexDirection: 'row', alignItems: 'flex-start', minHeight: 48 },
+  timelineLeft:         { alignItems: 'center', width: 36, marginRight: 14 },
+  timelineDot:          { width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center' },
+  timelineDotDone:      { backgroundColor: '#27AE60' },
+  timelineDotPending:   { backgroundColor: '#F1F2F6', borderWidth: 1.5, borderColor: '#DFE4EA' },
+  timelineLine:         { width: 2, flex: 1, minHeight: 12 },
+  timelineLineDone:     { backgroundColor: '#27AE60' },
+  timelineLinePending:  { backgroundColor: '#DFE4EA' },
+  timelineLabel:        { fontSize: 14, paddingTop: 8, fontWeight: '600', flex: 1 },
+  timelineLabelDone:    { color: '#2F3542' },
+  timelineLabelPending: { color: '#A4B0BE' },
+
+  // Info card
+  infoCard: {
+    backgroundColor: '#FFFFFF', borderRadius: 16, paddingHorizontal: 16,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06, shadowRadius: 8, elevation: 3,
+  },
+  infoRow:      { flexDirection: 'row', alignItems: 'center', paddingVertical: 14 },
+  infoIconWrap: { width: 38, height: 38, borderRadius: 10, backgroundColor: '#EBF4FF', justifyContent: 'center', alignItems: 'center', marginRight: 14 },
+  infoTextWrap: { flex: 1 },
+  infoLabel:    { fontSize: 12, color: '#A4B0BE', fontWeight: '500', marginBottom: 2 },
+  infoValue:    { fontSize: 14, color: '#2F3542', fontWeight: '600' },
+  divider:      { height: 1, backgroundColor: '#F1F2F6', marginLeft: 52 },
+
+  // Description
+  descriptionCard: {
+    backgroundColor: '#FFFFFF', borderRadius: 16, padding: 18,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06, shadowRadius: 8, elevation: 3,
+  },
+  descriptionText: { fontSize: 14, color: '#2F3542', lineHeight: 22 },
+
+  // Images
+  rescueImage: { width: 160, height: 120, borderRadius: 12, marginRight: 10 },
+
+  // Status banners
+  confirmedBanner: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    backgroundColor: '#E8F8F0', padding: 14, borderRadius: 14, marginBottom: 16, gap: 8,
+  },
+  confirmedText:  { color: '#27AE60', fontSize: 14, fontWeight: '600' },
+  cancelledBanner: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    backgroundColor: '#F1F2F6', padding: 14, borderRadius: 14, marginBottom: 16, gap: 8,
+  },
+  cancelledText: { color: '#747D8C', fontSize: 14, fontWeight: '600' },
+
+  // Cancel button — nằm trong ScrollView, có border radius, margin đủ
+  cancelBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 8, backgroundColor: '#C0392B',
+    paddingVertical: 15, borderRadius: 14, marginTop: 8,
+    shadowColor: '#C0392B', shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3, shadowRadius: 8, elevation: 5,
+  },
+  cancelBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
+
+  // Modal
+  modalOverlay:  { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  modalContent:  { backgroundColor: '#FFFFFF', borderRadius: 20, padding: 24, width: '100%', maxWidth: 420 },
+  modalIconWrap: { alignItems: 'center', marginBottom: 10 },
+  modalTitle:    { fontSize: 17, fontWeight: '700', color: '#2F3542', textAlign: 'center', marginBottom: 6 },
+  modalDesc:     { fontSize: 13, color: '#747D8C', textAlign: 'center', marginBottom: 14 },
+  input: {
+    borderWidth: 1, borderColor: '#DFE4EA', borderRadius: 12,
+    padding: 12, minHeight: 90, fontSize: 14, color: '#2F3542',
+    backgroundColor: '#F8F9FA',
+  },
+  modalButtons:    { flexDirection: 'row', gap: 10, marginTop: 16 },
+  modalBtn:        { flex: 1, paddingVertical: 13, borderRadius: 12, alignItems: 'center' },
+  modalBtnClose:   { backgroundColor: '#DFE4EA' },
+  modalBtnConfirm: { backgroundColor: '#C0392B' },
+  modalBtnDisabled:{ opacity: 0.45 },
+  modalBtnText:    { fontSize: 14, fontWeight: '700', color: '#FFFFFF' },
 });
 
-export default RequestDetailScreen;
+export default RescueRequestDetailScreen;

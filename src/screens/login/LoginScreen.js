@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -22,12 +22,20 @@ const LoginScreen = ({ navigation }) => {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const phoneRef = useRef(null);
+  const passwordRef = useRef(null);
 
   useEffect(() => {
     if (user) {
       navigation.goBack();
     }
   }, [user]);
+  useEffect(() => {
+    const t = setTimeout(() => {
+      phoneRef.current?.focus?.();
+    }, 300);
+    return () => clearTimeout(t);
+  }, []);
 
   const validatePhone = (phoneNumber) => {
     const phoneRegex = /^(0|\+84)[3|5|7|8|9][0-9]{8}$/;
@@ -105,6 +113,7 @@ const LoginScreen = ({ navigation }) => {
           <View style={styles.inputContainer}>
             <Ionicons name="call" size={20} color="#95a5a6" style={styles.inputIcon} />
             <TextInput
+              ref={phoneRef}
               style={styles.input}
               placeholder="Số điện thoại"
               placeholderTextColor="#95a5a6"
@@ -113,12 +122,16 @@ const LoginScreen = ({ navigation }) => {
               keyboardType="phone-pad"
               maxLength={11}
               editable={!loading}
+              showSoftInputOnFocus
+              disableFullscreenUI
+              onPressIn={() => phoneRef.current?.focus?.()}
             />
           </View>
 
           <View style={styles.inputContainer}>
             <Ionicons name="lock-closed" size={20} color="#95a5a6" style={styles.inputIcon} />
             <TextInput
+              ref={passwordRef}
               style={styles.input}
               placeholder="Mật khẩu"
               placeholderTextColor="#95a5a6"
@@ -127,6 +140,9 @@ const LoginScreen = ({ navigation }) => {
               secureTextEntry={!showPassword}
               autoCapitalize="none"
               editable={!loading}
+              showSoftInputOnFocus
+              disableFullscreenUI
+              onPressIn={() => passwordRef.current?.focus?.()}
             />
             <TouchableOpacity
               onPress={() => setShowPassword(!showPassword)}

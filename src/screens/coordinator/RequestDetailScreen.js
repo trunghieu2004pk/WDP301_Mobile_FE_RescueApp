@@ -12,6 +12,7 @@ import {
   FlatList,
   Image,
   Dimensions,
+  TextInput,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
@@ -37,7 +38,7 @@ const EMERGENCY_LEVELS = [
   { value: 'LOW',    label: 'Thấp',       color: '#27AE60' },
   { value: 'MEDIUM', label: 'Trung bình', color: '#F39C12' },
   { value: 'HIGH',   label: 'Cao',        color: '#E74C3C' },
-  { value: 'URGENT', label: 'Khẩn cấp',  color: '#FF4757' },
+  { value: 'CRITICAL', label: 'Khẩn cấp',  color: '#FF4757' },
 ];
 
 const getStatusInfo = (status) =>
@@ -105,6 +106,9 @@ const RequestDetailScreen = ({ route, navigation }) => {
   const [inventories, setInventories] = useState([]);
   const [inventoriesLoading, setInventoriesLoading] = useState(false);
   const [suppliesDraft, setSuppliesDraft] = useState({});
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
+  const [cancelling, setCancelling] = useState(false);
 
   // ─── Reverse geocode ──────────────────────────────────────────────────────
   const reverseGeocode = async (req) => {
@@ -337,6 +341,30 @@ const RequestDetailScreen = ({ route, navigation }) => {
     setLightboxVisible(true);
   };
 
+  const cancelRequest = async () => {
+    try {
+      setCancelling(true);
+      const id = request._id || request.id;
+      const response = await fetch(`${API_URL}/rescue-requests/${id}/cancel`, {
+        method: 'PATCH',
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cancelReason: cancelReason?.trim() || '' }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data?.message || `Lỗi ${response.status}`);
+      }
+      setRequest(prev => ({ ...(prev || {}), status: 'CANCELLED', ...(data?.data ?? data) }));
+      setShowCancelModal(false);
+      setCancelReason('');
+      Alert.alert('Đã hủy', 'Yêu cầu đã được hủy.');
+    } catch (e) {
+      Alert.alert('Lỗi', e.message || 'Không thể hủy yêu cầu');
+    } finally {
+      setCancelling(false);
+    }
+  };
+
   if (loading) {
     return (
       <SafeAreaView style={[styles.container, { paddingTop: insets.top }]}>
@@ -483,6 +511,14 @@ const RequestDetailScreen = ({ route, navigation }) => {
             <Text style={styles.actionButtonText}>
               {isAssigned ? 'Đổi đội cứu hộ' : 'Gán đội cứu hộ'}
             </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.actionButton, styles.cancelAction]}
+            onPress={() => setShowCancelModal(true)}
+            disabled={updating}
+          >
+            <Ionicons name="close-circle" size={20} color="#FFFFFF" />
+            <Text style={styles.actionButtonText}>Hủy yêu cầu</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -704,6 +740,39 @@ const RequestDetailScreen = ({ route, navigation }) => {
         </View>
       </Modal>
 
+      <Modal visible={showCancelModal} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Lý do hủy yêu cầu</Text>
+            <TextInput
+              style={styles.cancelInput}
+              placeholder="Nhập lý do hủy"
+              value={cancelReason}
+              onChangeText={setCancelReason}
+              multiline
+            />
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.cancelButton]}
+                onPress={() => setShowCancelModal(false)}
+              >
+                <Text style={styles.modalButtonText}>Đóng</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.confirmButton]}
+                onPress={cancelRequest}
+                disabled={cancelling || !cancelReason?.trim()}
+              >
+                {cancelling
+                  ? <ActivityIndicator size="small" color="#fff" />
+                  : <Text style={styles.modalButtonText}>Xác nhận</Text>
+                }
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       {/* Modal: Phân loại khẩn cấp */}
       <Modal visible={showEmergencyModal} transparent animationType="slide">
         <View style={styles.modalOverlay}>
@@ -810,6 +879,7 @@ const styles = StyleSheet.create({
   verifyButton: { backgroundColor: '#27AE60' },
   assignButton: { backgroundColor: '#2E91FF' },
   assignedButton: { backgroundColor: '#7F8C8D' },
+  cancelAction: { backgroundColor: '#C0392B' },
   actionButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
   modalContent: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 24, width: '100%', maxWidth: 400 },
@@ -820,6 +890,7 @@ const styles = StyleSheet.create({
   cancelButton: { backgroundColor: '#C0392B' },
   confirmButton: { backgroundColor: '#2E91FF' },
   modalButtonText: { fontSize: 16, fontWeight: '600', color: '#FFFFFF' },
+  cancelInput: { borderWidth: 1, borderColor: '#DFE4EA', borderRadius: 10, padding: 12, minHeight: 80, color: '#2F3542' },
   teamsLoading: { alignItems: 'center', paddingVertical: 40, gap: 12 },
   teamsLoadingText: { fontSize: 14, color: '#747D8C' },
   teamItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 14, paddingHorizontal: 4, borderRadius: 8 },

@@ -210,13 +210,14 @@ const RequestStatusScreen = ({ navigation }) => {
           requests
             .filter((item) => {
               const s = String(item.status || '').toUpperCase();
-              return ['PENDING','VERIFIED','PROCESSING','IN_PROGRESS','ON_THE_WAY','COMPLETED'].includes(s);
+              return ['PENDING','VERIFIED','PROCESSING','IN_PROGRESS','ON_THE_WAY','COMPLETED','CANCELLED'].includes(s);
             })
             .map((item) => {
             const id           = item._id ?? item.id;
             const s            = String(item.status || '').toUpperCase();
             const stage        =
               s === 'COMPLETED' ? { label: 'Đã xác nhận hoàn thành', color: C.green, bg: C.greenLight, icon: 'checkmark-circle-outline', done: true }
+              : s === 'CANCELLED' ? { label: 'Đã hủy', color: C.red, bg: C.redLight, icon: 'close-circle-outline', done: false }
               : ['PROCESSING','IN_PROGRESS','ON_THE_WAY'].includes(s) ? { label: 'Đang xử lý', color: C.blue, bg: C.blueLight, icon: 'sync-outline', done: false }
               : { label: 'Đang chờ xác nhận', color: C.amber, bg: C.amberLight, icon: 'time-outline', done: false };
 

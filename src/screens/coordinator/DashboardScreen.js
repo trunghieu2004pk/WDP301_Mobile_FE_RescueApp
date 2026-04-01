@@ -31,11 +31,11 @@ const STATUS_LABELS = {
 };
 
 const EMERGENCY_MAP = {
-  LOW: 'Thấp', MEDIUM: 'Trung bình', HIGH: 'Cao', URGENT: 'Khẩn cấp',
+  LOW: 'Thấp', MEDIUM: 'Trung bình', HIGH: 'Cao', CRITICAL: 'Khẩn cấp',
 };
 
 const EMERGENCY_COLORS = {
-  LOW: C.green, MEDIUM: C.amber, HIGH: '#F97316', URGENT: C.red,
+  LOW: C.green, MEDIUM: C.amber, HIGH: '#F97316', CRITICAL: C.red,
 };
 
 const startOfToday = () => { const d = new Date(); d.setHours(0,0,0,0); return d; };

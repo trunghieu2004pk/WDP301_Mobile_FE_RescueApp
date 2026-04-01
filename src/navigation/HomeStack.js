@@ -12,6 +12,8 @@ import AssignedTaskDetailScreen from '../screens/team/AssignedTaskDetailScreen';
 import UserProfile from '../screens/user/UserProfile';
 import EditUserProfile from '../screens/user/EditUserProfile';
 import ChangePassword from '../screens/user/ChangePassword';
+import DonateScreen from '../screens/user/DonateScreen';
+import DonateHistoryScreen from '../screens/user/DonateHistoryScreen';
 
 import {
   DangerMapScreen,
@@ -19,7 +21,6 @@ import {
   VolunteerScreen,
   NewsAlertsScreen,
   StatisticsScreen,
-  DonateScreen,
 } from './PlaceholderScreens';
 
 const Stack = createNativeStackNavigator();
@@ -67,6 +68,11 @@ const HomeStack = () => (
       options={{ title: 'Trạng thái cứu hộ' }}
     />
     <Stack.Screen
+      name="RescueRequestDetail"
+      component={RescueRequestDetailScreen}
+      options={{ title: 'Chi tiết yêu cầu', headerShown: false }}
+    />
+    <Stack.Screen
       name="DangerMap"
       component={DangerMapScreen}
       options={{ title: 'Bản đồ nguy hiểm' }}
@@ -80,6 +86,11 @@ const HomeStack = () => (
       name="Donate"
       component={DonateScreen}
       options={{ title: 'Quyên góp' }}
+    />
+    <Stack.Screen
+      name="DonateHistory"
+      component={DonateHistoryScreen}
+      options={{ title: 'Lịch sử quyên góp' }}
     />
     <Stack.Screen
       name="NewsAlerts"

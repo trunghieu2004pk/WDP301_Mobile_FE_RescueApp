@@ -13,6 +13,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Linking, AppState } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../../context/AuthContext';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL;
@@ -32,6 +33,7 @@ const C = {
 
 const DonateScreen = () => {
   const insets = useSafeAreaInsets();
+  const navigation = useNavigation();
   const { getAuthHeaders, user } = useAuth();
 
   const [amount, setAmount] = useState('');
@@ -44,30 +46,6 @@ const DonateScreen = () => {
   const [notifyType,   setNotifyType]   = useState('info');
   const [notifyTitle,  setNotifyTitle]  = useState('');
   const [notifyMsg,    setNotifyMsg]    = useState('');
-  const [history, setHistory] = useState([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
-  const [detailVisible, setDetailVisible] = useState(false);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [detailData, setDetailData] = useState(null);
-
-  const fetchHistory = React.useCallback(async () => {
-    if (!user) return;
-    setHistoryLoading(true);
-    try {
-      const res = await fetch(`${API_URL}/donations`, {
-        method: 'GET',
-        headers: getAuthHeaders(),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok) {
-        const list = Array.isArray(data) ? data : data.data ?? data.items ?? data.results ?? [];
-        setHistory(list);
-      }
-    } catch {
-    } finally {
-      setHistoryLoading(false);
-    }
-  }, [user, getAuthHeaders]);
 
   const onDonate = async () => {
     const value = Number(amount);
@@ -141,9 +119,6 @@ const DonateScreen = () => {
         setNotifyMsg(`Giao dịch đang được xử lý. Mã đơn: ${orderId}`);
       }
       setNotifyVisible(true);
-      if (['PAID','SUCCESS','PAID_SUCCESS','PAID_OK','COMPLETED'].includes(s)) {
-        fetchHistory();
-      }
     } catch (e) {
       setNotifyType('error');
       setNotifyTitle('Lỗi');
@@ -185,50 +160,55 @@ const DonateScreen = () => {
     };
   }, [orderId, checkStatus]);
 
-  React.useEffect(() => {
-    fetchHistory();
-  }, [fetchHistory]);
-
-  const openDonationDetail = async (orderIdParam) => {
-    setDetailVisible(true);
-    setDetailLoading(true);
-    setDetailData(null);
-    try {
-      const res = await fetch(`${API_URL}/donations/${encodeURIComponent(String(orderIdParam))}`, {
-        method: 'GET',
-        headers: getAuthHeaders(),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(data?.message || `Lỗi ${res.status}`);
-      }
-      setDetailData(data?.data ?? data);
-    } catch (e) {
-      setDetailData({ error: e.message || 'Không thể tải chi tiết giao dịch' });
-    } finally {
-      setDetailLoading(false);
-    }
-  };
+  if (!user) {
+    return (
+      <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.container}>
+        <View style={styles.center}>
+          <View style={[styles.stateIcon, { backgroundColor: C.blueLight }]}>
+            <Ionicons name="lock-closed-outline" size={36} color={C.blue} />
+          </View>
+          <Text style={styles.stateTitle}>Chưa đăng nhập</Text>
+          <Text style={styles.stateSub}>
+            Vui lòng đăng nhập để thực hiện quyên góp và lưu lịch sử ủng hộ.
+          </Text>
+          <TouchableOpacity
+            style={[styles.stateBtn, { backgroundColor: C.blue }]}
+            onPress={() => navigation.getParent()?.navigate('Trang chủ', { screen: 'Login' })}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="log-in-outline" size={16} color={C.white} />
+            <Text style={styles.stateBtnText}>Đăng nhập ngay</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView edges={['left', 'right', 'bottom']} style={styles.container}>
       <ScrollView contentContainerStyle={[styles.content, { paddingTop: insets.top + 16 }]}>
-        <View style={styles.headerRow}>
-          <Text style={styles.title}>Ủng hộ hoạt động cứu hộ</Text>
-          <View style={styles.badge}>
-            <Ionicons name="heart" size={14} color={C.red} />
-            <Text style={styles.badgeText}>VNPay</Text>
+        <View style={styles.headerCard}>
+          <View style={styles.headerLeft}>
+            <View style={styles.headerIconWrap}>
+              <Ionicons name="heart" size={20} color={C.red} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.headerTitle}>Ủng hộ cứu hộ</Text>
+              <Text style={styles.headerSubtitle}>Thanh toán qua VNPay an toàn</Text>
+              <View style={styles.pillRow}>
+                <View style={styles.pill}>
+                  <Ionicons name="shield-checkmark-outline" size={14} color={C.red} />
+                  <Text style={styles.pillText}>VNPay</Text>
+                </View>
+              </View>
+            </View>
           </View>
+          <TouchableOpacity style={styles.historyBtn} onPress={() => navigation.navigate('DonateHistory')}>
+            <Ionicons name="time-outline" size={20} color={C.blue} />
+            <Text style={styles.historyBtnText}>Lịch sử</Text>
+          </TouchableOpacity>
         </View>
 
-        {!user && (
-          <View style={[styles.notice, { backgroundColor: C.blueLight }]}>
-            <Ionicons name="information-circle-outline" size={18} color={C.blue} />
-            <Text style={[styles.noticeText, { color: C.blue }]}>
-              Bạn có thể ủng hộ không cần đăng nhập, nhưng đăng nhập giúp lưu lại lịch sử ủng hộ.
-            </Text>
-          </View>
-        )}
 
         <Text style={styles.label}>Số tiền (VND)</Text>
         <TextInput
@@ -291,60 +271,6 @@ const DonateScreen = () => {
             <Text style={[styles.noticeText, { color: C.text }]}>{statusText}</Text>
           </View>
         )}
-
-        <View style={styles.hr} />
-        <Text style={styles.sectionTitle}>Lịch sử ủng hộ</Text>
-        {!user ? (
-          <View style={[styles.notice, { backgroundColor: C.blueLight }]}>
-            <Ionicons name="lock-closed-outline" size={18} color={C.blue} />
-            <Text style={[styles.noticeText, { color: C.blue }]}>
-              Đăng nhập để xem lịch sử ủng hộ của bạn.
-            </Text>
-          </View>
-        ) : historyLoading ? (
-          <View style={{ alignItems: 'center', paddingVertical: 12 }}>
-            <ActivityIndicator size="small" color={C.blue} />
-          </View>
-        ) : history.length === 0 ? (
-          <View style={styles.emptyHistory}>
-            <Ionicons name="time-outline" size={28} color={C.sub} />
-            <Text style={styles.emptyHistoryText}>Chưa có giao dịch ủng hộ</Text>
-          </View>
-        ) : (
-          history.map((h) => {
-            const ord = h.orderId || h.orderCode;
-            const id = h._id || h.id || ord;
-            const amt = h.amount || h.totalAmount || 0;
-            const when = h.createdAt || h.paidAt || h.updatedAt;
-            const st = String(h.status || '').toUpperCase();
-            const info =
-              ['PAID','SUCCESS','PAID_SUCCESS','PAID_OK','COMPLETED'].includes(st)
-                ? { color: C.green, bg: '#E8FFF1', icon: 'checkmark-circle', text: 'Thành công' }
-                : ['PENDING','PROCESSING'].includes(st)
-                ? { color: C.blue, bg: C.blueLight, icon: 'sync-outline', text: 'Đang xử lý' }
-                : { color: C.red, bg: C.redLight, icon: 'alert-circle', text: 'Thất bại' };
-            return (
-              <TouchableOpacity key={id} style={styles.historyCard} activeOpacity={0.85} onPress={() => openDonationDetail(ord || id)}>
-                <View style={styles.historyHead}>
-                  <Text style={styles.orderText}>#{(ord || id)?.slice?.(-8)?.toUpperCase?.() || '—'}</Text>
-                  <View style={[styles.statusPill, { backgroundColor: info.bg }]}>
-                    <Ionicons name={info.icon} size={12} color={info.color} />
-                    <Text style={[styles.statusPillText, { color: info.color }]}>{info.text}</Text>
-                  </View>
-                </View>
-                <View style={styles.historyRow}>
-                  <Text style={styles.amountText}>
-                    {Number(amt).toLocaleString('vi-VN')} đ
-                  </Text>
-                  <Text style={styles.dateText}>
-                    {when ? new Date(when).toLocaleString('vi-VN') : '—'}
-                  </Text>
-                </View>
-                {h.message ? <Text style={styles.msgText}>{h.message}</Text> : null}
-              </TouchableOpacity>
-            );
-          })
-        )}
       </ScrollView>
       <Modal visible={notifyVisible} transparent animationType="fade" onRequestClose={() => setNotifyVisible(false)}>
         <View style={styles.modalOverlay}>
@@ -379,53 +305,6 @@ const DonateScreen = () => {
           </View>
         </View>
       </Modal>
-      <Modal visible={detailVisible} transparent animationType="fade" onRequestClose={() => setDetailVisible(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.detailBox}>
-            <View style={styles.detailHeader}>
-              <Text style={styles.detailTitle}>Chi tiết ủng hộ</Text>
-              <TouchableOpacity onPress={() => setDetailVisible(false)}>
-                <Ionicons name="close" size={20} color={C.sub} />
-              </TouchableOpacity>
-            </View>
-            {detailLoading ? (
-              <View style={{ alignItems: 'center', paddingVertical: 16 }}>
-                <ActivityIndicator size="small" color={C.blue} />
-              </View>
-            ) : detailData?.error ? (
-              <View style={[styles.notice, { backgroundColor: C.redLight }]}>
-                <Ionicons name="alert-circle" size={18} color={C.red} />
-                <Text style={[styles.noticeText, { color: C.red }]}>{detailData.error}</Text>
-              </View>
-            ) : (
-              <View style={{ gap: 10 }}>
-                <View style={styles.detailRowKV}>
-                  <Text style={styles.kvLabel}>Mã đơn</Text>
-                  <Text style={styles.kvValue}>{(detailData?._id || detailData?.id || detailData?.orderId || '').slice(-12).toUpperCase()}</Text>
-                </View>
-                <View style={styles.detailRowKV}>
-                  <Text style={styles.kvLabel}>Số tiền</Text>
-                  <Text style={styles.kvValue}>{Number(detailData?.amount || 0).toLocaleString('vi-VN')} đ</Text>
-                </View>
-                <View style={styles.detailRowKV}>
-                  <Text style={styles.kvLabel}>Trạng thái</Text>
-                  <Text style={styles.kvValue}>{detailData?.status || '—'}</Text>
-                </View>
-                <View style={styles.detailRowKV}>
-                  <Text style={styles.kvLabel}>Thời gian</Text>
-                  <Text style={styles.kvValue}>{detailData?.paidAt ? new Date(detailData.paidAt).toLocaleString('vi-VN') : (detailData?.createdAt ? new Date(detailData.createdAt).toLocaleString('vi-VN') : '—')}</Text>
-                </View>
-                {detailData?.message ? (
-                  <View style={styles.detailMsgBox}>
-                    <Text style={styles.detailMsgLabel}>Lời nhắn</Text>
-                    <Text style={styles.detailMsgText}>{detailData.message}</Text>
-                  </View>
-                ) : null}
-              </View>
-            )}
-          </View>
-        </View>
-      </Modal>
     </SafeAreaView>
   );
 };
@@ -433,7 +312,70 @@ const DonateScreen = () => {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
   content: { paddingHorizontal: 16, paddingBottom: 36, gap: 12 },
-  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
+  stateIcon: { width: 72, height: 72, borderRadius: 22, justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
+  stateTitle: { fontSize: 18, fontWeight: '800', color: C.text, marginBottom: 8, letterSpacing: -0.3 },
+  stateSub: { fontSize: 14, color: C.sub, textAlign: 'center', lineHeight: 22, marginBottom: 24 },
+  stateBtn: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 24, paddingVertical: 13, borderRadius: 14, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.25, shadowRadius: 8, elevation: 5 },
+  stateBtnText: { color: C.white, fontWeight: '700', fontSize: 14 },
+  headerCard: {
+    backgroundColor: C.white,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 16,
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
+  headerIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: C.redLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#FFCDD0',
+  },
+  headerTitle: { fontSize: 20, fontWeight: '800', color: C.text },
+  headerSubtitle: { marginTop: 2, fontSize: 12, color: C.sub },
+  pillRow: { marginTop: 8, flexDirection: 'row', gap: 8 },
+  pill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: C.redLight,
+    borderWidth: 1,
+    borderColor: '#FFCDD0',
+    alignSelf: 'flex-start',
+  },
+  pillText: { fontSize: 12, fontWeight: '700', color: C.red },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 24,
+  },
+  historyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: C.blueLight,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    gap: 6,
+  },
+  historyBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: C.blue,
+  },
   title: { fontSize: 20, fontWeight: '800', color: C.text },
   badge: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: C.redLight, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, borderWidth: 1, borderColor: '#FFCDD0' },
   badgeText: { color: C.red, fontSize: 12, fontWeight: '700' },

@@ -28,7 +28,7 @@ const URGENCY_MAP = {
   LOW:    { label: 'Thấp',       color: '#27AE60' },
   MEDIUM: { label: 'Trung bình', color: '#F39C12' },
   HIGH:   { label: 'Cao',        color: '#E74C3C' },
-  URGENT: { label: 'Khẩn cấp',  color: '#FF4757' },
+  CRITICAL: { label: 'Khẩn cấp',  color: '#FF4757' },
 };
 
 const getStatusInfo = (status) =>
